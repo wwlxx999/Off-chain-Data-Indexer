@@ -1,0 +1,84 @@
+# 环境变量和配置文件
+.env
+.env.local
+.env.production
+.env.staging
+*.env
+
+# 日志文件
+logs/
+*.log
+
+# 编译后的可执行文件
+*.exe
+*.dll
+*.so
+*.dylib
+main
+main.exe
+monitored_sync
+monitored_sync.exe
+
+# Go 相关
+# 如果你有vendor目录
+vendor/
+
+# 测试覆盖率文件
+*.out
+
+# IDE 和编辑器文件
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# 操作系统生成的文件
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# 临时文件
+*.tmp
+*.temp
+
+# 数据库文件（如果有本地数据库文件）
+*.db
+*.sqlite
+*.sqlite3
+
+# Docker 相关（保留docker-compose.yml）
+.dockerignore
+
+# 备份文件
+*.bak
+*.backup
+
+# 缓存目录
+cache/
+tmp/
+temp/
+
+# 构建输出
+build/
+dist/
+out/
+
+# 依赖管理（通常保留go.mod和go.sum）
+# go.sum 应该被提交，所以不要忽略它
+
+# 私钥和证书
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+
+# 配置文件中的敏感信息
+config/local.json
+config/production.json
+config/staging.json

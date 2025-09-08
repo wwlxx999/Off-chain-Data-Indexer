@@ -2,6 +2,8 @@ package services
 
 import (
 	"errors"
+	"fmt"
+	"math/big"
 	"time"
 
 	"Off-chainDatainDexer/database"
@@ -57,12 +59,29 @@ type HourlyStatsResponse struct {
 	EndTime         time.Time `json:"end_time"`
 }
 
+// HourlyTrendPoint 小时趋势数据点
+type HourlyTrendPoint struct {
+	Time        time.Time `json:"time"`
+	Hour        string    `json:"hour"`
+	Count       int64     `json:"count"`
+	TotalAmount string    `json:"total_amount"`
+}
+
+// HourlyTrendResponse 小时趋势响应
+type HourlyTrendResponse struct {
+	Data      []HourlyTrendPoint `json:"data"`
+	TimeRange string             `json:"time_range"`
+	StartTime time.Time          `json:"start_time"`
+	EndTime   time.Time          `json:"end_time"`
+}
+
 // TransferService 转账服务
 type TransferService struct {
-	db           *gorm.DB
-	cacheService *CacheService
-	bytePool     *utils.BytePool
-	perfMonitor  *utils.PerformanceMonitor
+	db            *gorm.DB
+	cacheService  *CacheService
+	marketService *MarketService
+	bytePool      *utils.BytePool
+	perfMonitor   *utils.PerformanceMonitor
 }
 
 // NewTransferService 创建新的转账服务
@@ -77,6 +96,11 @@ func NewTransferService(db *gorm.DB) *TransferService {
 // SetCacheService 设置缓存服务
 func (s *TransferService) SetCacheService(cache *CacheService) {
 	s.cacheService = cache
+}
+
+// SetMarketService 设置市场服务
+func (s *TransferService) SetMarketService(market *MarketService) {
+	s.marketService = market
 }
 
 // GetTransfers 获取转账记录列表（使用分布式锁防止缓存击穿）
@@ -134,11 +158,18 @@ func (s *TransferService) fetchTransfersFromDB(page, pageSize int) (*TransferLis
 	// 转换为响应格式
 	responseTransfers := make([]TransferResponse, len(transfers))
 	for i, transfer := range transfers {
+		// 格式化金额
+		amount, ok := new(big.Int).SetString(transfer.Amount, 10)
+		if !ok {
+			amount = big.NewInt(0)
+		}
+		formattedAmount := utils.FormatUSDTAmount(amount)
+
 		responseTransfers[i] = TransferResponse{
 			ID:              transfer.ID,
 			FromAddress:     transfer.FromAddress,
 			ToAddress:       transfer.ToAddress,
-			Amount:          transfer.Amount,
+			Amount:          formattedAmount,
 			TransactionHash: transfer.TransactionHash,
 			BlockNumber:     transfer.BlockNumber,
 			Timestamp:       transfer.Timestamp,
@@ -220,11 +251,18 @@ func (s *TransferService) fetchTransfersByAddressFromDB(address string, page, pa
 	// 转换为响应格式
 	responseTransfers := make([]TransferResponse, len(transfers))
 	for i, transfer := range transfers {
+		// 格式化金额
+		amount, ok := new(big.Int).SetString(transfer.Amount, 10)
+		if !ok {
+			amount = big.NewInt(0)
+		}
+		formattedAmount := utils.FormatUSDTAmount(amount)
+
 		responseTransfers[i] = TransferResponse{
 			ID:              transfer.ID,
 			FromAddress:     transfer.FromAddress,
 			ToAddress:       transfer.ToAddress,
-			Amount:          transfer.Amount,
+			Amount:          formattedAmount,
 			TransactionHash: transfer.TransactionHash,
 			BlockNumber:     transfer.BlockNumber,
 			Timestamp:       transfer.Timestamp,
@@ -251,11 +289,18 @@ func (s *TransferService) GetTransferByHash(hash string) (*TransferResponse, err
 		return nil, utils.NewDatabaseError("Failed to find transfer by hash", err)
 	}
 
+	// 格式化金额
+	amount, ok := new(big.Int).SetString(transfer.Amount, 10)
+	if !ok {
+		amount = big.NewInt(0)
+	}
+	formattedAmount := utils.FormatUSDTAmount(amount)
+
 	return &TransferResponse{
 		ID:              transfer.ID,
 		FromAddress:     transfer.FromAddress,
 		ToAddress:       transfer.ToAddress,
-		Amount:          transfer.Amount,
+		Amount:          formattedAmount,
 		TransactionHash: transfer.TransactionHash,
 		BlockNumber:     transfer.BlockNumber,
 		Timestamp:       transfer.Timestamp,
@@ -286,11 +331,18 @@ func (s *TransferService) CreateTransfer(req *TransferRequest) (*TransferRespons
 		return nil, utils.NewDatabaseError("Failed to create transfer record", err)
 	}
 
+	// 格式化金额
+	amount, ok := new(big.Int).SetString(transfer.Amount, 10)
+	if !ok {
+		amount = big.NewInt(0)
+	}
+	formattedAmount := utils.FormatUSDTAmount(amount)
+
 	return &TransferResponse{
 		ID:              transfer.ID,
 		FromAddress:     transfer.FromAddress,
 		ToAddress:       transfer.ToAddress,
-		Amount:          transfer.Amount,
+		Amount:          formattedAmount,
 		TransactionHash: transfer.TransactionHash,
 		BlockNumber:     transfer.BlockNumber,
 		Timestamp:       transfer.Timestamp,
@@ -298,26 +350,9 @@ func (s *TransferService) CreateTransfer(req *TransferRequest) (*TransferRespons
 	}, nil
 }
 
-// GetStats 获取统计信息（使用分布式锁防止缓存击穿）
+// GetStats 获取统计信息（临时禁用缓存进行调试）
 func (s *TransferService) GetStats() (*StatsResponse, error) {
-	if s.cacheService != nil {
-		cacheKey := CacheKeys.StatsKey()
-		var stats StatsResponse
-
-		// 使用分布式锁防止缓存击穿
-		err := s.cacheService.GetWithLock(cacheKey, &stats, 30*time.Second, func() (interface{}, error) {
-			return s.fetchStatsFromDB()
-		})
-
-		if err != nil {
-			utils.Warn("Failed to get stats with lock, falling back to direct DB query: %v", err)
-			return s.fetchStatsFromDB()
-		}
-
-		return &stats, nil
-	}
-
-	// 如果没有缓存服务，直接查询数据库
+	// 临时直接查询数据库，绕过缓存
 	return s.fetchStatsFromDB()
 }
 
@@ -327,9 +362,23 @@ func (s *TransferService) fetchStatsFromDB() (*StatsResponse, error) {
 	var uniqueAddresses int64
 	var latestBlockNumber uint64
 
-	// 获取总转账数
-	if err := database.DB.Model(&database.Transfer{}).Count(&totalTransfers).Error; err != nil {
-		return nil, utils.NewDatabaseError("Failed to count total transfers", err)
+	// 获取真实的TRON链上USDT交易总数
+	if s.marketService != nil {
+		marketData, err := s.marketService.GetUSDTMarketData()
+		if err == nil && marketData.Transfers > 0 {
+			totalTransfers = marketData.Transfers
+		} else {
+			utils.Warn("Failed to get real TRON chain data, falling back to database count: %v", err)
+			// 回退到数据库统计
+			if err := database.DB.Model(&database.Transfer{}).Count(&totalTransfers).Error; err != nil {
+				return nil, utils.NewDatabaseError("Failed to count total transfers", err)
+			}
+		}
+	} else {
+		// 如果没有市场服务，使用数据库统计
+		if err := database.DB.Model(&database.Transfer{}).Count(&totalTransfers).Error; err != nil {
+			return nil, utils.NewDatabaseError("Failed to count total transfers", err)
+		}
 	}
 
 	// 获取唯一地址数（发送方和接收方）
@@ -352,9 +401,23 @@ func (s *TransferService) fetchStatsFromDB() (*StatsResponse, error) {
 		return nil, utils.NewDatabaseError("Failed to get latest block number", err)
 	}
 
+	// 计算总交易量（USDT金额）
+	var totalAmountResult struct {
+		Sum float64
+	}
+	if err := database.DB.Raw(`
+		SELECT COALESCE(SUM(amount::NUMERIC), 0) as sum 
+		FROM transfers
+	`).Scan(&totalAmountResult).Error; err != nil {
+		return nil, utils.NewDatabaseError("Failed to calculate total amount", err)
+	}
+
+	// 将最小单位转换为USDT（除以10^6）
+	totalAmountUSDT := totalAmountResult.Sum / 1000000
+
 	stats := &StatsResponse{
 		TotalTransfers:    totalTransfers,
-		TotalAmount:       "0", // 这里可以根据需要计算总金额
+		TotalAmount:       fmt.Sprintf("%.6f", totalAmountUSDT),
 		UniqueAddresses:   uniqueAddresses,
 		LatestBlockNumber: latestBlockNumber,
 	}
@@ -368,6 +431,26 @@ func (s *TransferService) fetchStatsFromDB() (*StatsResponse, error) {
 	}
 
 	return stats, nil
+}
+
+// GetYesterdayTransferCount 获取昨天的转账数量
+func (s *TransferService) GetYesterdayTransferCount() (int64, error) {
+	// 计算昨天的时间范围
+	now := time.Now()
+	yesterday := now.AddDate(0, 0, -1)
+	startOfYesterday := time.Date(yesterday.Year(), yesterday.Month(), yesterday.Day(), 0, 0, 0, 0, yesterday.Location())
+	endOfYesterday := startOfYesterday.Add(24 * time.Hour)
+
+	var transferCount int64
+
+	// 获取昨天的转账数量（使用timestamp字段，即实际转账时间）
+	if err := database.DB.Model(&database.Transfer{}).
+		Where("timestamp >= ? AND timestamp < ?", startOfYesterday, endOfYesterday).
+		Count(&transferCount).Error; err != nil {
+		return 0, utils.NewDatabaseError("Failed to count yesterday transfers", err)
+	}
+
+	return transferCount, nil
 }
 
 // GetHourlyStats 获取最近一小时内的USDT交易统计
@@ -420,5 +503,113 @@ func (s *TransferService) GetHourlyStats() (*HourlyStatsResponse, error) {
 		TimeRange:       "Last 1 hour",
 		StartTime:       startTime,
 		EndTime:         endTime,
+	}, nil
+}
+
+// GetHourlyTrend 获取指定时段按5分钟间隔的转账趋势数据
+func (s *TransferService) GetHourlyTrend(date *time.Time, timeSlot string) (*HourlyTrendResponse, error) {
+	// 使用北京时间时区
+	loc, _ := time.LoadLocation("Asia/Shanghai")
+	
+	// 如果没有指定日期，使用当前时间
+	var baseTime time.Time
+	if date != nil {
+		baseTime = date.In(loc)
+	} else {
+		baseTime = time.Now().In(loc)
+	}
+
+	// 根据时段确定时间范围
+	var startTime, endTime time.Time
+	var timeRange string
+
+	switch timeSlot {
+	case "morning": // 上午 6:00-12:00
+		startTime = time.Date(baseTime.Year(), baseTime.Month(), baseTime.Day(), 6, 0, 0, 0, loc)
+		endTime = time.Date(baseTime.Year(), baseTime.Month(), baseTime.Day(), 12, 0, 0, 0, loc)
+		timeRange = "上午 (6:00-12:00)"
+	case "afternoon": // 下午 12:00-18:00
+		startTime = time.Date(baseTime.Year(), baseTime.Month(), baseTime.Day(), 12, 0, 0, 0, loc)
+		endTime = time.Date(baseTime.Year(), baseTime.Month(), baseTime.Day(), 18, 0, 0, 0, loc)
+		timeRange = "下午 (12:00-18:00)"
+	case "evening": // 晚上 18:00-24:00
+		startTime = time.Date(baseTime.Year(), baseTime.Month(), baseTime.Day(), 18, 0, 0, 0, loc)
+		endTime = time.Date(baseTime.Year(), baseTime.Month(), baseTime.Day()+1, 0, 0, 0, 0, loc)
+		timeRange = "晚上 (18:00-24:00)"
+	case "night": // 深夜 0:00-6:00
+		startTime = time.Date(baseTime.Year(), baseTime.Month(), baseTime.Day(), 0, 0, 0, 0, loc)
+		endTime = time.Date(baseTime.Year(), baseTime.Month(), baseTime.Day(), 6, 0, 0, 0, loc)
+		timeRange = "深夜 (0:00-6:00)"
+	default: // 全天 0:00-24:00
+		startTime = time.Date(baseTime.Year(), baseTime.Month(), baseTime.Day(), 0, 0, 0, 0, loc)
+		endTime = time.Date(baseTime.Year(), baseTime.Month(), baseTime.Day()+1, 0, 0, 0, 0, loc)
+		timeRange = "全天 (0:00-24:00)"
+	}
+
+	// 根据时段选择不同的时间间隔
+	var intervalMinutes int
+	if timeSlot == "all" {
+		intervalMinutes = 60 // 全天时段使用1小时间隔
+	} else {
+		intervalMinutes = 15 // 特定时段使用15分钟间隔
+	}
+
+	// 计算时间间隔数量
+	duration := endTime.Sub(startTime)
+	intervalCount := int(duration.Minutes()) / intervalMinutes
+
+	// 创建指定数量的时间间隔数据点
+	var trendData []HourlyTrendPoint
+	for i := 0; i < intervalCount; i++ {
+		intervalStart := startTime.Add(time.Duration(i) * time.Duration(intervalMinutes) * time.Minute)
+		intervalEnd := intervalStart.Add(time.Duration(intervalMinutes) * time.Minute)
+
+		// 将时间转换为UTC进行数据库查询
+		intervalStartUTC := intervalStart.UTC()
+		intervalEndUTC := intervalEnd.UTC()
+
+		// 查询该时间间隔内的转账数量
+		var transferCount int64
+		if err := database.DB.Model(&database.Transfer{}).
+			Where("timestamp >= ? AND timestamp < ?", intervalStartUTC, intervalEndUTC).
+			Count(&transferCount).Error; err != nil {
+			return nil, utils.NewDatabaseError("Failed to count transfers in interval", err)
+		}
+
+		// 查询该时间间隔内的总交易金额（amount字段是最小单位，需要转换为USDT）
+		var totalAmountResult struct {
+			Sum string
+		}
+		if err := database.DB.Raw(`
+			SELECT COALESCE(SUM(CAST(amount AS DECIMAL)), 0) as sum 
+			FROM transfers 
+			WHERE timestamp >= ? AND timestamp < ?
+		`, intervalStartUTC, intervalEndUTC).Scan(&totalAmountResult).Error; err != nil {
+			return nil, utils.NewDatabaseError("Failed to calculate total amount in interval", err)
+		}
+
+		// 将最小单位转换为USDT（除以10^6）
+		formattedAmount := "0"
+		if totalAmountResult.Sum != "" && totalAmountResult.Sum != "0" {
+			// 将字符串转换为big.Int进行精确计算
+			totalAmountBig := new(big.Int)
+			if _, ok := totalAmountBig.SetString(totalAmountResult.Sum, 10); ok {
+				formattedAmount = utils.FormatUSDTAmount(totalAmountBig)
+			}
+		}
+
+		trendData = append(trendData, HourlyTrendPoint{
+			Time:        intervalStart,
+			Hour:        intervalStart.Format("15:04"),
+			Count:       transferCount,
+			TotalAmount: formattedAmount,
+		})
+	}
+
+	return &HourlyTrendResponse{
+		Data:      trendData,
+		TimeRange: timeRange,
+		StartTime: startTime,
+		EndTime:   endTime,
 	}, nil
 }

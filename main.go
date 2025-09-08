@@ -83,6 +83,10 @@ func main() {
 	}
 	indexerService = services.NewIndexerService()
 	marketService = services.NewMarketService()
+	
+	// 设置服务之间的依赖关系
+	transferService.SetMarketService(marketService)
+	marketService.SetTransferService(transferService)
 
 	// 创建Tron客户端
 	tronClient = blockchain.NewTronHTTPClient(cfg.TronNodeURL, cfg.TronAPIKey, cfg.USDTContract)
@@ -99,6 +103,7 @@ func main() {
 	r := gin.New()
 
 	// 添加中间件
+	r.Use(corsMiddleware())
 	r.Use(errorHandlingMiddleware())
 	r.Use(loggingMiddleware())
 	r.Use(gin.Recovery())
@@ -151,6 +156,7 @@ func main() {
 			stats.GET("/summary", getStatsSummary)
 			stats.GET("/addresses/top", getTopAddresses)
 			stats.GET("/hourly", getHourlyStats)
+			stats.GET("/hourly-trend", getHourlyTrend)
 		}
 
 		// 市场数据接口
@@ -217,6 +223,24 @@ func main() {
 	utils.Info("Server starting on port 8080...")
 	if err := r.Run(":8080"); err != nil {
 		utils.Fatal("Failed to start server: %v", err)
+	}
+}
+
+// corsMiddleware CORS中间件
+func corsMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Header("Access-Control-Allow-Origin", "*")
+		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		c.Header("Access-Control-Allow-Headers", "Origin, Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization")
+		c.Header("Access-Control-Expose-Headers", "Content-Length")
+		c.Header("Access-Control-Allow-Credentials", "true")
+
+		if c.Request.Method == "OPTIONS" {
+			c.AbortWithStatus(204)
+			return
+		}
+
+		c.Next()
 	}
 }
 
@@ -396,6 +420,19 @@ func getStatsSummary(c *gin.Context) {
 		return
 	}
 
+	// 获取链上最新区块号，覆盖数据库中的旧值
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	
+	latestBlock, err := tronClient.GetLatestBlockNumber(ctx)
+	if err != nil {
+		utils.Warn("Failed to get latest block from chain, using database value: %v", err)
+	} else {
+		// 用链上最新区块号覆盖数据库中的值
+		result.LatestBlockNumber = latestBlock
+		utils.Info("Updated latest block number from chain: %d", latestBlock)
+	}
+
 	c.JSON(http.StatusOK, result)
 }
 
@@ -475,12 +512,15 @@ func getTransfersByBlockRange(c *gin.Context) {
 
 // 获取最新区块号
 func getLatestBlock(c *gin.Context) {
-	// 从Tron网络获取最新区块号
+	// 使用真实的HTTP客户端获取最新区块号
+	utils.Info("Getting latest block number from Tron network...")
 	latestBlock, err := tronClient.GetLatestBlockNumber(context.Background())
 	if err != nil {
+		utils.Error("Failed to get latest block: %v", err)
 		handleAppError(c, utils.WrapError(err, "Failed to get latest block from Tron network"))
 		return
 	}
+	utils.Info("Latest block number retrieved: %d", latestBlock)
 
 	c.JSON(http.StatusOK, gin.H{
 		"latest_block": latestBlock,
@@ -671,6 +711,32 @@ func getHourlyStats(c *gin.Context) {
 	result, err := transferService.GetHourlyStats()
 	if err != nil {
 		handleAppError(c, utils.WrapError(err, "Failed to get hourly stats"))
+		return
+	}
+
+	c.JSON(http.StatusOK, result)
+}
+
+// getHourlyTrend 获取1小时转账趋势数据
+func getHourlyTrend(c *gin.Context) {
+	// 获取可选的日期参数
+	var date *time.Time
+	if dateStr := c.Query("date"); dateStr != "" {
+		parsedDate, err := time.Parse("2006-01-02", dateStr)
+		if err != nil {
+			handleAppError(c, utils.NewValidationError("Invalid date format, expected YYYY-MM-DD", err))
+			return
+		}
+		date = &parsedDate
+	}
+
+	// 获取可选的时段参数
+	timeSlot := c.Query("timeSlot")
+
+	// 调用服务层
+	result, err := transferService.GetHourlyTrend(date, timeSlot)
+	if err != nil {
+		handleAppError(c, utils.WrapError(err, "Failed to get hourly trend"))
 		return
 	}
 

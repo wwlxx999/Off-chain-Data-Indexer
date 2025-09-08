@@ -213,7 +213,7 @@ func ParseUSDTAmount(amountStr string) (*big.Int, error) {
 // FormatUSDTAmount 格式化USDT金额为可读格式
 func FormatUSDTAmount(amount *big.Int) string {
 	if amount == nil {
-		return "0"
+		return "0.00"
 	}
 
 	// USDT有6位小数
@@ -223,16 +223,19 @@ func FormatUSDTAmount(amount *big.Int) string {
 	integerPart := new(big.Int).Div(amount, divisor)
 	remainder := new(big.Int).Mod(amount, divisor)
 
-	// 如果余数为0，只返回整数部分
+	// 如果余数为0，返回整数部分加.00
 	if remainder.Cmp(big.NewInt(0)) == 0 {
-		return integerPart.String()
+		return fmt.Sprintf("%s.00", integerPart.String())
 	}
 
 	// 格式化小数部分
 	decimalStr := fmt.Sprintf("%06d", remainder.Uint64())
 
-	// 移除尾随的零
+	// 移除尾随的零，但至少保留2位小数
 	decimalStr = strings.TrimRight(decimalStr, "0")
+	if len(decimalStr) < 2 {
+		decimalStr = fmt.Sprintf("%02s", decimalStr)
+	}
 
 	return fmt.Sprintf("%s.%s", integerPart.String(), decimalStr)
 }

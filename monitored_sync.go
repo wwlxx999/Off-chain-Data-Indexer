@@ -156,7 +156,7 @@ func abs(x float64) float64 {
 
 func main() {
 	fmt.Println("=== 多节点系统监控同步开始 ===")
-	fmt.Println("目标: 同步300个区块")
+	fmt.Println("目标: 同步1200个区块")
 	fmt.Println("监控: 实时性能监控，检测卡死风险")
 	fmt.Println("========================================")
 	
@@ -243,10 +243,10 @@ func main() {
 	}
 	
 	// 计算同步范围
-	startBlock := latestBlock - 300 + 1
+	startBlock := latestBlock - 1200 + 1
 	endBlock := latestBlock
 	
-	fmt.Printf("同步范围: %d - %d (共300个区块)\n", startBlock, endBlock)
+	fmt.Printf("同步范围: %d - %d (共1200个区块)\n", startBlock, endBlock)
 	fmt.Printf("开始时间: %s\n", time.Now().Format("2006-01-02 15:04:05"))
 	fmt.Println("========================================")
 	
@@ -275,7 +275,7 @@ func main() {
 	fmt.Println("\n========================================")
 	fmt.Println("=== 同步完成统计 ===")
 	fmt.Printf("总耗时: %v\n", duration)
-	fmt.Printf("平均每区块: %v\n", duration/300)
+	fmt.Printf("平均每区块: %v\n", duration/1200)
 	fmt.Printf("最终Goroutines: %d\n", runtime.NumGoroutine())
 	fmt.Printf("最终内存使用: %.2f MB\n", float64(m.Alloc)/1024/1024)
 	fmt.Printf("总GC次数: %d\n", m.NumGC)

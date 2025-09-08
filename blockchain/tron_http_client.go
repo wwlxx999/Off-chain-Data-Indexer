@@ -183,7 +183,7 @@ func (tc *TronHTTPClient) makeRequest(ctx context.Context, method, endpoint stri
 				return nil, utils.NewInternalError("Failed to create HTTP request", err)
 			}
 
-			// 设置请求头
+			// 设置请求头 - 总是设置Content-Type，因为Tron API需要这个头
 			req.Header.Set("Content-Type", "application/json")
 			req.Header.Set("User-Agent", "TronHTTPClient/1.0")
 			if node.APIKey != "" {
@@ -291,6 +291,7 @@ func (tc *TronHTTPClient) makeRequestSingle(ctx context.Context, method, endpoin
 			return nil, utils.NewInternalError("Failed to create HTTP request", err)
 		}
 
+		// 总是设置Content-Type为application/json，因为Tron API需要这个头
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("User-Agent", "TronHTTPClient/1.0")
 		if apiKey != "" {
@@ -359,7 +360,8 @@ func (tc *TronHTTPClient) makeRequestSingle(ctx context.Context, method, endpoin
 func (tc *TronHTTPClient) GetLatestBlockNumber(ctx context.Context) (uint64, error) {
 	utils.Info("Fetching latest block number from Tron network...")
 
-	body, err := tc.makeRequest(ctx, "POST", "/wallet/getnowblock", nil)
+	// 使用 /walletsolidity/getnowblock 端点，不需要请求体参数
+	body, err := tc.makeRequest(ctx, "POST", "/walletsolidity/getnowblock", nil)
 	if err != nil {
 		return 0, err
 	}

@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>刷新测试页面</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .test-container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        .status {
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+        .success { background-color: #d4edda; color: #155724; }
+        .error { background-color: #f8d7da; color: #721c24; }
+        .info { background-color: #d1ecf1; color: #0c5460; }
+        button {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        #log {
+            background-color: #f8f9fa;
+            border: 1px solid #dee2e6;
+            padding: 10px;
+            height: 200px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <div class="test-container">
+        <h1>前端刷新修复测试</h1>
+        <p>这个页面用于测试前端页面刷新后是否还会卡死的问题。</p>
+        
+        <div class="status info">
+            <strong>测试说明：</strong>
+            <ul>
+                <li>点击"测试API连接"按钮测试后端API是否正常</li>
+                <li>点击"模拟页面刷新"按钮测试页面刷新逻辑</li>
+                <li>观察日志输出，确认没有卡死现象</li>
+            </ul>
+        </div>
+        
+        <div>
+            <button onclick="testAPI()">测试API连接</button>
+            <button onclick="simulateRefresh()">模拟页面刷新</button>
+            <button onclick="clearLog()">清空日志</button>
+        </div>
+        
+        <div id="status" class="status info">等待测试...</div>
+        
+        <h3>测试日志：</h3>
+        <div id="log"></div>
+    </div>
+
+    <script>
+        let logElement = document.getElementById('log');
+        let statusElement = document.getElementById('status');
+        let testCount = 0;
+        
+        function log(message) {
+            const timestamp = new Date().toLocaleTimeString();
+            logElement.innerHTML += `[${timestamp}] ${message}\n`;
+            logElement.scrollTop = logElement.scrollHeight;
+        }
+        
+        function setStatus(message, type = 'info') {
+            statusElement.className = `status ${type}`;
+            statusElement.innerHTML = message;
+        }
+        
+        function clearLog() {
+            logElement.innerHTML = '';
+            log('日志已清空');
+        }
+        
+        async function testAPI() {
+            testCount++;
+            log(`开始第 ${testCount} 次API测试...`);
+            setStatus('正在测试API连接...', 'info');
+            
+            try {
+                const response = await fetch('http://localhost:8080/api/v1/indexer/latest-block');
+                if (response.ok) {
+                    const data = await response.json();
+                    log(`API测试成功: ${JSON.stringify(data)}`);
+                    setStatus('API连接正常', 'success');
+                } else {
+                    log(`API测试失败: HTTP ${response.status}`);
+                    setStatus('API连接失败', 'error');
+                }
+            } catch (error) {
+                log(`API测试异常: ${error.message}`);
+                setStatus('API连接异常', 'error');
+            }
+        }
+        
+        function simulateRefresh() {
+            log('模拟页面刷新...');
+            setStatus('正在模拟页面刷新...', 'info');
+            
+            // 模拟页面刷新的关键步骤
+            try {
+                // 1. 清除现有状态
+                log('1. 清除现有状态');
+                
+                // 2. 重新初始化
+                log('2. 重新初始化应用状态');
+                
+                // 3. 加载数据
+                log('3. 开始加载数据...');
+                testAPI().then(() => {
+                    log('4. 数据加载完成');
+                    setStatus('页面刷新模拟完成', 'success');
+                });
+                
+            } catch (error) {
+                log(`刷新模拟失败: ${error.message}`);
+                setStatus('页面刷新模拟失败', 'error');
+            }
+        }
+        
+        // 页面加载完成后自动运行一次测试
+        window.addEventListener('load', function() {
+            log('页面加载完成');
+            setTimeout(() => {
+                testAPI();
+            }, 1000);
+        });
+        
+        // 监听页面可见性变化
+        document.addEventListener('visibilitychange', function() {
+            if (document.hidden) {
+                log('页面变为不可见');
+            } else {
+                log('页面变为可见');
+            }
+        });
+        
+        log('测试页面初始化完成');
+    </script>
+</body>
+</html>

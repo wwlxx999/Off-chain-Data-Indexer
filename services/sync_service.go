@@ -1826,6 +1826,30 @@ func (s *SyncService) retryTaskWithDifferentNode(task *SyncTask) {
 		return // 单节点模式无法重分配
 	}
 	
+	// 检查并发管理器是否可用
+	if s.concurrentManager == nil || s.concurrentManager.taskChan == nil {
+		utils.Warn("Concurrent manager not available, cannot reassign task for blocks %d-%d", 
+			task.StartBlock, task.EndBlock)
+		// 添加到失败队列
+		for blockNum := task.StartBlock; blockNum <= task.EndBlock; blockNum++ {
+			s.recordFailedBlock(blockNum, "concurrent manager unavailable")
+		}
+		return
+	}
+	
+	// 检查上下文是否已取消
+	select {
+	case <-s.concurrentManager.ctx.Done():
+		utils.Warn("Cannot reassign task, sync manager is stopping")
+		// 如果无法重分配，添加到失败队列
+		for blockNum := task.StartBlock; blockNum <= task.EndBlock; blockNum++ {
+			s.recordFailedBlock(blockNum, "task reassignment failed - manager stopping")
+		}
+		return
+	default:
+		// 继续执行
+	}
+	
 	// 选择下一个可用节点
 	nextNodeIndex := (task.NodeIndex + 1) % nodeCount
 	
@@ -1842,7 +1866,7 @@ func (s *SyncService) retryTaskWithDifferentNode(task *SyncTask) {
 		retryTask.StartBlock, retryTask.EndBlock, nextNodeIndex, 
 		retryTask.RetryCount, s.config.RetryConfig.MaxRetries)
 	
-	// 将重试任务重新加入队列
+	// 将重试任务重新加入队列，使用非阻塞方式
 	select {
 	case s.concurrentManager.taskChan <- retryTask:
 		utils.Info("Task reassigned to node %d for blocks %d-%d", 
@@ -1851,7 +1875,7 @@ func (s *SyncService) retryTaskWithDifferentNode(task *SyncTask) {
 		utils.Warn("Cannot reassign task, sync manager is stopping")
 		// 如果无法重分配，添加到失败队列
 		for blockNum := task.StartBlock; blockNum <= task.EndBlock; blockNum++ {
-			s.recordFailedBlock(blockNum, "task reassignment failed")
+			s.recordFailedBlock(blockNum, "task reassignment failed - manager stopped")
 		}
 	default:
 		utils.Warn("Task queue full, cannot reassign task for blocks %d-%d", 

@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TRON USDT 索引器 - 数据可视化平台</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <div class="container">
+        <!-- 头部导航 -->
+        <header class="header">
+            <div class="header-content">
+                <div class="logo">
+                    <i class="fab fa-ethereum"></i>
+                    <h1>TRON USDT 索引器</h1>
+                </div>
+                <nav class="nav">
+                    <a href="#overview" class="nav-link active">概览</a>
+                    <a href="#transfers" class="nav-link">转账记录</a>
+                    <a href="#analytics" class="nav-link">数据分析</a>
+                    <a href="#system" class="nav-link">系统状态</a>
+                </nav>
+            </div>
+        </header>
+
+        <!-- 主要内容区域 -->
+        <main class="main">
+            <!-- 综合数据概览 -->
+            <section id="overview" class="section">
+                <h2 class="section-title">TRON USDT 数据概览</h2>
+                <div class="unified-data-grid">
+                    <!-- 基础数据指标 -->
+                    <div class="market-card">
+                        <div class="market-icon">
+                            <i class="fas fa-exchange-alt"></i>
+                        </div>
+                        <div class="market-content">
+                            <h3 class="market-value" id="totalTransfers">-</h3>
+                            <p class="market-label">总转账数 (Total Transfers)</p>
+                        </div>
+                    </div>
+                    <div class="market-card">
+                        <div class="market-icon">
+                            <i class="fas fa-dollar-sign"></i>
+                        </div>
+                        <div class="market-content">
+                            <h3 class="market-value" id="totalVolume">-</h3>
+                            <p class="market-label">总交易量 (USDT)</p>
+                        </div>
+                    </div>
+                    <div class="market-card">
+                        <div class="market-icon">
+                            <i class="fas fa-cube"></i>
+                        </div>
+                        <div class="market-content">
+                            <h3 class="market-value" id="latestBlock">-</h3>
+                            <p class="market-label">最新区块</p>
+                        </div>
+                    </div>
+                    <div class="market-card">
+                        <div class="market-icon">
+                            <i class="fas fa-clock"></i>
+                        </div>
+                        <div class="market-content">
+                            <h3 class="market-value" id="syncStatus">-</h3>
+                            <p class="market-label">同步状态</p>
+                        </div>
+                    </div>
+                    <!-- 市场数据指标 -->
+                    <div class="market-card">
+                        <div class="market-icon">
+                            <i class="fas fa-coins"></i>
+                        </div>
+                        <div class="market-content">
+                            <h3 class="market-value" id="totalSupply">-</h3>
+                            <p class="market-label">总供应量 (Total Supply)</p>
+                        </div>
+                    </div>
+                    <div class="market-card">
+                        <div class="market-icon">
+                            <i class="fas fa-chart-line"></i>
+                        </div>
+                        <div class="market-content">
+                            <h3 class="market-value" id="circulatingSupply">-</h3>
+                            <p class="market-label">流通供应量 (Circulating Supply)</p>
+                        </div>
+                    </div>
+                    <div class="market-card">
+                        <div class="market-icon">
+                            <i class="fas fa-dollar-sign"></i>
+                        </div>
+                        <div class="market-content">
+                            <h3 class="market-value" id="marketCap">-</h3>
+                            <p class="market-label">市值 (Market Cap)</p>
+                        </div>
+                    </div>
+                    <div class="market-card">
+                        <div class="market-icon">
+                            <i class="fas fa-chart-area"></i>
+                        </div>
+                        <div class="market-content">
+                            <h3 class="market-value" id="circulatingMarketCap">-</h3>
+                            <p class="market-label">流通市值 (Circulating Market Cap)</p>
+                        </div>
+                    </div>
+                    <div class="market-card">
+                        <div class="market-icon">
+                            <i class="fas fa-users"></i>
+                        </div>
+                        <div class="market-content">
+                            <h3 class="market-value" id="holders">-</h3>
+                            <p class="market-label">持有者数量 (Holders)</p>
+                        </div>
+                    </div>
+                    <div class="market-card">
+                        <div class="market-icon">
+                            <i class="fas fa-exchange-alt"></i>
+                        </div>
+                        <div class="market-content">
+                            <h3 class="market-value" id="transfersYesterday">-</h3>
+                            <p class="market-label">昨日转账数 (Transfers Yesterday)</p>
+                        </div>
+                    </div>
+                    <div class="market-card">
+                        <div class="market-icon">
+                            <i class="fas fa-chart-bar"></i>
+                        </div>
+                        <div class="market-content">
+                            <h3 class="market-value" id="tradingVolumeYesterday">-</h3>
+                            <p class="market-label">昨日交易量 (Trading Volume Yesterday)</p>
+                        </div>
+                    </div>
+                    <div class="market-card">
+                        <div class="market-icon">
+                            <i class="fas fa-tint"></i>
+                        </div>
+                        <div class="market-content">
+                            <h3 class="market-value" id="liquidity">-</h3>
+                            <p class="market-label">流动性 (Liquidity)</p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 转账记录表格 -->
+            <section id="transfers" class="section">
+                <div class="section-header">
+                    <h2 class="section-title">最新转账记录</h2>
+                    <div class="section-controls">
+                        <input type="text" id="searchInput" placeholder="搜索地址或交易哈希..." class="search-input">
+                        <button id="refreshBtn" class="btn btn-primary">
+                            <i class="fas fa-sync-alt"></i> 刷新
+                        </button>
+                    </div>
+                </div>
+                <div class="table-container">
+                    <table class="transfers-table">
+                        <thead>
+                            <tr>
+                                <th>交易哈希</th>
+                                <th>发送方</th>
+                                <th>接收方</th>
+                                <th>金额 (USDT)</th>
+                                <th>区块号</th>
+                                <th>时间</th>
+                                <th>状态</th>
+                            </tr>
+                        </thead>
+                        <tbody id="transfersTableBody">
+                            <!-- 动态加载数据 -->
+                        </tbody>
+                    </table>
+                </div>
+                <div class="pagination">
+                    <button id="prevPage" class="btn btn-secondary">上一页</button>
+                    <span id="pageInfo">第 1 页，共 1 页</span>
+                    <button id="nextPage" class="btn btn-secondary">下一页</button>
+                </div>
+            </section>
+
+            <!-- 数据分析图表 -->
+            <section id="analytics" class="section">
+                <h2 class="section-title">数据分析</h2>
+                <div class="charts-grid">
+                    <div class="chart-card">
+                        <div class="chart-header">
+                            <h3 class="chart-title">1小时转账趋势</h3>
+                            <div class="chart-controls">
+                                <input type="date" id="trendDatePicker" class="date-picker">
+                                <select id="timeSlotPicker" class="time-slot-picker">
+                                    <option value="all">全天</option>
+                                    <option value="morning">上午 (06:00-12:00)</option>
+                                    <option value="afternoon">下午 (12:00-18:00)</option>
+                                    <option value="evening">晚上 (18:00-24:00)</option>
+                                    <option value="night">深夜 (00:00-06:00)</option>
+                                </select>
+                                <button id="refreshTrendBtn" class="btn btn-sm btn-primary">
+                                    <i class="fas fa-sync-alt"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <canvas id="transferTrendChart"></canvas>
+                    </div>
+                    <div class="chart-card">
+                        <h3 class="chart-title">交易量分布</h3>
+                        <canvas id="volumeDistributionChart"></canvas>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 系统状态 -->
+            <section id="system" class="section">
+                <h2 class="section-title">系统状态</h2>
+                <div class="system-grid">
+                    <div class="system-card">
+                        <h3 class="system-title">节点状态</h3>
+                        <div id="nodeStatus" class="node-status">
+                            <!-- 动态加载节点状态 -->
+                        </div>
+                    </div>
+                    <div class="system-card">
+                        <h3 class="system-title">同步进度</h3>
+                        <div class="progress-container">
+                            <div class="progress-bar">
+                                <div id="syncProgress" class="progress-fill"></div>
+                            </div>
+                            <span id="syncPercentage">0%</span>
+                        </div>
+                    </div>
+                    <div class="system-card">
+                        <h3 class="system-title">性能指标</h3>
+                        <div class="metrics">
+                            <div class="metric">
+                                <span class="metric-label">TPS:</span>
+                                <span id="tpsValue" class="metric-value">-</span>
+                            </div>
+                            <div class="metric">
+                                <span class="metric-label">延迟:</span>
+                                <span id="latencyValue" class="metric-value">-</span>
+                            </div>
+                            <div class="metric">
+                                <span class="metric-label">内存使用:</span>
+                                <span id="memoryValue" class="metric-value">-</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <!-- 页脚 -->
+        <footer class="footer">
+            <p>&copy; 2024 TRON USDT 索引器. 开源项目 - <a href="https://github.com/wwlxx999/Off-chain-Data-Indexer-" target="_blank">GitHub</a></p>
+        </footer>
+    </div>
+
+    <!-- 加载提示 -->
+    <div id="loadingOverlay" class="loading-overlay">
+        <div class="loading-spinner">
+            <i class="fas fa-spinner fa-spin"></i>
+            <p>加载中...</p>
+        </div>
+    </div>
+
+    <script src="js/app.js?v=20250906-5"></script>
+</body>
+</html>

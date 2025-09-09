@@ -187,7 +187,7 @@ func (s *TransferService) fetchTransfersFromDB(page, pageSize int) (*TransferLis
 	// 缓存结果（缓存5分钟）
 	if s.cacheService != nil {
 		cacheKey := CacheKeys.TransferListKey(page, pageSize)
-		if err := s.cacheService.Set(cacheKey, response, 5*time.Minute); err != nil {
+		if err := s.cacheService.Set(cacheKey, response, 3*time.Minute); err != nil {
 			utils.Warn("Failed to cache transfer list: %v", err)
 		}
 	}
@@ -425,7 +425,7 @@ func (s *TransferService) fetchStatsFromDB() (*StatsResponse, error) {
 	// 缓存结果（缓存10分钟）
 	if s.cacheService != nil {
 		cacheKey := CacheKeys.StatsKey()
-		if err := s.cacheService.Set(cacheKey, stats, 10*time.Minute); err != nil {
+		if err := s.cacheService.Set(cacheKey, stats, 3*time.Minute); err != nil {
 			utils.Warn("Failed to cache stats: %v", err)
 		}
 	}
@@ -510,7 +510,7 @@ func (s *TransferService) GetHourlyStats() (*HourlyStatsResponse, error) {
 func (s *TransferService) GetHourlyTrend(date *time.Time, timeSlot string) (*HourlyTrendResponse, error) {
 	// 使用北京时间时区
 	loc, _ := time.LoadLocation("Asia/Shanghai")
-	
+
 	// 如果没有指定日期，使用当前时间
 	var baseTime time.Time
 	if date != nil {
@@ -612,4 +612,123 @@ func (s *TransferService) GetHourlyTrend(date *time.Time, timeSlot string) (*Hou
 		StartTime: startTime,
 		EndTime:   endTime,
 	}, nil
+}
+
+// VolumeDistributionItem 交易量分布项
+type VolumeDistributionItem struct {
+	Range       string  `json:"range"`
+	Count       int64   `json:"count"`
+	Percentage  float64 `json:"percentage"`
+	TotalAmount string  `json:"total_amount"`
+}
+
+// VolumeDistributionResponse 交易量分布响应
+type VolumeDistributionResponse struct {
+	Data              []VolumeDistributionItem `json:"data"`
+	TotalTransactions int64                    `json:"total_transactions"`
+	LastUpdated       time.Time                `json:"last_updated"`
+}
+
+// GetVolumeDistribution 获取交易量分布统计
+func (s *TransferService) GetVolumeDistribution() (*VolumeDistributionResponse, error) {
+	// 检查缓存
+	if s.cacheService != nil {
+		cacheKey := CacheKeys.VolumeDistributionKey()
+		var cached VolumeDistributionResponse
+		if err := s.cacheService.Get(cacheKey, &cached); err == nil {
+			return &cached, nil
+		}
+	}
+
+	// 定义金额范围（以最小单位计算，USDT精度为6位小数）
+	ranges := []struct {
+		label string
+		min   int64
+		max   int64
+	}{
+		{"0-100 USDT", 0, 100000000},                      // 0 到 100 USDT
+		{"100-1K USDT", 100000000, 1000000000},            // 100 到 1000 USDT
+		{"1K-10K USDT", 1000000000, 10000000000},          // 1K 到 10K USDT
+		{"10K-100K USDT", 10000000000, 100000000000},      // 10K 到 100K USDT
+		{"100K+ USDT", 100000000000, 9223372036854775807}, // 100K+ USDT
+	}
+
+	var distributionData []VolumeDistributionItem
+	var totalTransactions int64
+
+	// 获取总交易数
+	if err := database.DB.Model(&database.Transfer{}).Count(&totalTransactions).Error; err != nil {
+		return nil, utils.NewDatabaseError("Failed to count total transactions", err)
+	}
+
+	// 为每个范围计算统计数据
+	for _, r := range ranges {
+		var count int64
+		var totalAmountResult struct {
+			Sum float64
+		}
+
+		// 计算该范围内的交易数量
+		query := database.DB.Model(&database.Transfer{})
+		if r.max == 9223372036854775807 { // 最大范围
+			query = query.Where("amount::BIGINT >= ?", r.min)
+		} else {
+			query = query.Where("amount::BIGINT >= ? AND amount::BIGINT < ?", r.min, r.max)
+		}
+
+		if err := query.Count(&count).Error; err != nil {
+			return nil, utils.NewDatabaseError(fmt.Sprintf("Failed to count transactions for range %s", r.label), err)
+		}
+
+		// 计算该范围内的总金额
+		if r.max == 9223372036854775807 {
+			if err := database.DB.Raw(`
+				SELECT COALESCE(SUM(amount::NUMERIC), 0) as sum 
+				FROM transfers 
+				WHERE amount::BIGINT >= ?
+			`, r.min).Scan(&totalAmountResult).Error; err != nil {
+				return nil, utils.NewDatabaseError(fmt.Sprintf("Failed to calculate total amount for range %s", r.label), err)
+			}
+		} else {
+			if err := database.DB.Raw(`
+				SELECT COALESCE(SUM(amount::NUMERIC), 0) as sum 
+				FROM transfers 
+				WHERE amount::BIGINT >= ? AND amount::BIGINT < ?
+			`, r.min, r.max).Scan(&totalAmountResult).Error; err != nil {
+				return nil, utils.NewDatabaseError(fmt.Sprintf("Failed to calculate total amount for range %s", r.label), err)
+			}
+		}
+
+		// 计算百分比
+		var percentage float64
+		if totalTransactions > 0 {
+			percentage = float64(count) / float64(totalTransactions) * 100
+		}
+
+		// 转换为USDT单位
+		totalAmountUSDT := totalAmountResult.Sum / 1000000
+
+		distributionData = append(distributionData, VolumeDistributionItem{
+			Range:       r.label,
+			Count:       count,
+			Percentage:  percentage,
+			TotalAmount: fmt.Sprintf("%.6f", totalAmountUSDT),
+		})
+	}
+
+	response := &VolumeDistributionResponse{
+		Data:              distributionData,
+		TotalTransactions: totalTransactions,
+		LastUpdated:       time.Now(),
+	}
+
+	// 缓存结果（缓存15分钟）
+	if s.cacheService != nil {
+		cacheKey := CacheKeys.VolumeDistributionKey()
+		if err := s.cacheService.Set(cacheKey, response, 3*time.Minute); err != nil {
+			utils.Warn("Failed to cache volume distribution: %v", err)
+		}
+	}
+
+	return response, nil
 }

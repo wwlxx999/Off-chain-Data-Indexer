@@ -28,7 +28,7 @@ func (s *IndexerService) IndexTransferData(transfers []TransferRequest) (int, er
 	for _, transfer := range transfers {
 		_, err := s.transferService.CreateTransfer(&transfer)
 		if err != nil {
-			utils.Error("Failed to index transfer %s: %v", transfer.TransactionHash, err)
+			utils.FileLog(utils.ERROR, "Failed to index transfer %s: %v", transfer.TransactionHash, err)
 			errorCount++
 			continue
 		}

@@ -231,7 +231,7 @@ func (ms *MarketService) GetUSDTMarketData() (*USDTMarketData, error) {
 	}
 
 	// 缓存结果（5分钟TTL）
-	ms.setCache(cacheKey, result, 5*time.Minute)
+	ms.setCache(cacheKey, result, 3*time.Minute)
 	utils.Info("Successfully fetched and cached TronScan USDT data")
 
 	return result, nil
@@ -433,7 +433,7 @@ func (ms *MarketService) getCoinGeckoPriceData() (*MarketDataResponse, error) {
 	}
 
 	// 缓存结果（5分钟TTL）
-	ms.setCache(cacheKey, &marketData[0], 5*time.Minute)
+	ms.setCache(cacheKey, &marketData[0], 3*time.Minute)
 	utils.Info("Successfully fetched and cached CoinGecko price data")
 
 	return &marketData[0], nil
@@ -511,7 +511,7 @@ func (ms *MarketService) getDetailedCoinGeckoPriceData() (*MarketDataResponse, e
 	}
 
 	// 缓存结果（5分钟TTL）
-	ms.setCache(cacheKey, result, 5*time.Minute)
+	ms.setCache(cacheKey, result, 3*time.Minute)
 	utils.Info("Successfully fetched and cached CoinGecko detailed price data")
 
 	return result, nil
@@ -546,8 +546,8 @@ func (ms *MarketService) GetUSDTDataFromCoinGecko() (*USDTMarketData, error) {
 		DataSource:               "CoinGecko",
 	}
 
-	// 缓存结果（5分钟TTL）
-	ms.setCache(cacheKey, result, 5*time.Minute)
+	// 缓存结果（3分钟TTL）
+	ms.setCache(cacheKey, result, 3*time.Minute)
 	utils.Info("Successfully fetched and cached CoinGecko USDT data")
 
 	return result, nil
@@ -628,8 +628,8 @@ func (ms *MarketService) GetUSDTMarketDataFromCoinGecko() (*USDTMarketData, erro
 		DataSource:               "CoinGecko",
 	}
 
-	// 缓存结果（5分钟TTL）
-	ms.setCache(cacheKey, result, 5*time.Minute)
+	// 缓存结果（3分钟TTL）
+	ms.setCache(cacheKey, result, 3*time.Minute)
 	utils.Info("Successfully fetched and cached CoinGecko market USDT data")
 
 	return result, nil
@@ -714,8 +714,8 @@ func (ms *MarketService) GetDetailedUSDTDataFromCoinGecko() (*USDTMarketData, er
 		DataSource:               "CoinGecko (Detailed)",
 	}
 
-	// 缓存结果（5分钟TTL）
-	ms.setCache(cacheKey, result, 5*time.Minute)
+	// 缓存结果（3分钟TTL）
+	ms.setCache(cacheKey, result, 3*time.Minute)
 	utils.Info("Successfully fetched and cached CoinGecko detailed USDT data")
 
 	return result, nil
@@ -851,8 +851,8 @@ func (ms *MarketService) GetDetailedUSDTData() (*USDTMarketData, error) {
 		DataSource:               "TronScan (Detailed)",
 	}
 
-	// 缓存结果（5分钟TTL）
-	ms.setCache(cacheKey, result, 5*time.Minute)
+	// 缓存结果（3分钟TTL）
+	ms.setCache(cacheKey, result, 3*time.Minute)
 	utils.Info("Successfully fetched and cached TronScan detailed USDT data")
 
 	return result, nil

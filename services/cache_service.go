@@ -212,6 +212,11 @@ func (g *CacheKeyGenerator) BlockRangeKey(start, end uint64) string {
 	return fmt.Sprintf("transfers:blocks:%d:%d", start, end)
 }
 
+// VolumeDistributionKey 生成交易量分布缓存键
+func (g *CacheKeyGenerator) VolumeDistributionKey() string {
+	return "stats:volume_distribution"
+}
+
 // GetWithLock 使用分布式锁获取缓存，防止缓存击穿
 func (c *CacheService) GetWithLock(key string, dest interface{}, lockTTL time.Duration, fetchFunc func() (interface{}, error)) error {
 	// 先尝试直接从缓存获取
@@ -251,7 +256,7 @@ func (c *CacheService) GetWithLock(key string, dest interface{}, lockTTL time.Du
 	}
 
 	// 设置缓存
-	if err := c.Set(key, data, 10*time.Minute); err != nil {
+	if err := c.Set(key, data, 3*time.Minute); err != nil {
 		return fmt.Errorf("failed to set cache: %w", err)
 	}
 
@@ -289,7 +294,7 @@ func (c *CacheService) GetWithTryLock(key string, dest interface{}, lockTTL time
 		}
 
 		// 设置缓存
-		if err := c.Set(key, data, 10*time.Minute); err != nil {
+		if err := c.Set(key, data, 3*time.Minute); err != nil {
 			return fmt.Errorf("failed to set cache: %w", err)
 		}
 

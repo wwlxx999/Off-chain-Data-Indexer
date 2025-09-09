@@ -42,13 +42,15 @@ func (l LogLevel) String() string {
 
 // Logger 自定义日志器
 type Logger struct {
-	level       LogLevel
-	logger      *log.Logger
-	filePath    string
-	errorCount  map[string]int64 // 错误统计
-	mutex       sync.RWMutex     // 保护错误统计的互斥锁
-	lastHealth  time.Time        // 最后健康检查时间
-	healthStats map[string]interface{} // 健康状态统计
+	level         LogLevel
+	fileLogger    *log.Logger  // 文件日志器
+	consoleLogger *log.Logger  // 控制台日志器
+	filePath      string
+	errorCount    map[string]int64 // 错误统计
+	mutex         sync.RWMutex     // 保护错误统计的互斥锁
+	lastHealth    time.Time        // 最后健康检查时间
+	healthStats   map[string]interface{} // 健康状态统计
+	fileOutput    *os.File     // 文件输出
 }
 
 // StructuredLog 结构化日志条目
@@ -73,9 +75,14 @@ type HealthMetrics struct {
 
 // NewLogger 创建新的日志器
 func NewLogger(level LogLevel, filePath string) (*Logger, error) {
-	var output *os.File
+	var fileOutput *os.File
 	var err error
 
+	// 创建控制台日志器
+	consoleLogger := log.New(os.Stdout, "", 0)
+
+	// 创建文件日志器
+	var fileLogger *log.Logger
 	if filePath != "" {
 		// 确保日志目录存在
 		logDir := filepath.Dir(filePath)
@@ -84,33 +91,37 @@ func NewLogger(level LogLevel, filePath string) (*Logger, error) {
 		}
 
 		// 打开或创建日志文件
-		output, err = os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+		fileOutput, err = os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
 		if err != nil {
 			return nil, fmt.Errorf("failed to open log file: %v", err)
 		}
+		fileLogger = log.New(fileOutput, "", 0)
 	} else {
-		// 使用标准输出
-		output = os.Stdout
+		// 如果没有文件路径，文件日志器也使用标准输出
+		fileLogger = consoleLogger
 	}
 
 	return &Logger{
-		level:       level,
-		logger:      log.New(output, "", 0),
-		filePath:    filePath,
-		errorCount:  make(map[string]int64),
-		lastHealth:  time.Now(),
-		healthStats: make(map[string]interface{}),
+		level:         level,
+		fileLogger:    fileLogger,
+		consoleLogger: consoleLogger,
+		filePath:      filePath,
+		errorCount:    make(map[string]int64),
+		lastHealth:    time.Now(),
+		healthStats:   make(map[string]interface{}),
+		fileOutput:    fileOutput,
 	}, nil
 }
 
 // log 内部日志方法
-func (l *Logger) log(level LogLevel, format string, args ...interface{}) {
+// logToFile 输出日志到文件
+func (l *Logger) logToFile(level LogLevel, format string, args ...interface{}) {
 	if level < l.level {
 		return
 	}
 
 	// 获取调用者信息
-	_, file, line, ok := runtime.Caller(2)
+	_, file, line, ok := runtime.Caller(3)
 	if !ok {
 		file = "unknown"
 		line = 0
@@ -125,13 +136,25 @@ func (l *Logger) log(level LogLevel, format string, args ...interface{}) {
 	message := fmt.Sprintf(format, args...)
 	logMessage := fmt.Sprintf("[%s] %s %s:%d - %s", level.String(), timestamp, file, line, message)
 
-	// 输出日志
-	l.logger.Println(logMessage)
+	// 输出到文件
+	l.fileLogger.Println(logMessage)
 
 	// 如果是FATAL级别，退出程序
 	if level == FATAL {
 		os.Exit(1)
 	}
+}
+
+// logToConsole 输出日志到控制台
+func (l *Logger) logToConsole(format string, args ...interface{}) {
+	// 直接输出到控制台，不添加时间戳和文件信息
+	message := fmt.Sprintf(format, args...)
+	l.consoleLogger.Println(message)
+}
+
+// log 内部日志方法（保持向后兼容）
+func (l *Logger) log(level LogLevel, format string, args ...interface{}) {
+	l.logToFile(level, format, args...)
 }
 
 // Debug 输出DEBUG级别日志
@@ -172,10 +195,8 @@ func (l *Logger) SetLevel(level LogLevel) {
 
 // Close 关闭日志文件
 func (l *Logger) Close() error {
-	if l.filePath != "" {
-		if file, ok := l.logger.Writer().(*os.File); ok && file != os.Stdout && file != os.Stderr {
-			return file.Close()
-		}
+	if l.fileOutput != nil && l.fileOutput != os.Stdout && l.fileOutput != os.Stderr {
+		return l.fileOutput.Close()
 	}
 	return nil
 }
@@ -227,7 +248,28 @@ func Fatal(format string, args ...interface{}) {
 	if GlobalLogger != nil {
 		GlobalLogger.Fatal(format, args...)
 	} else {
-		log.Fatalf("[FATAL] "+format, args...)
+		log.Fatalf(format, args...)
+	}
+}
+
+// Console 输出到控制台（用于进度条等重要信息）
+func Console(format string, args ...interface{}) {
+	if GlobalLogger != nil {
+		GlobalLogger.logToConsole(format, args...)
+	} else {
+		fmt.Printf(format+"\n", args...)
+	}
+}
+
+// ProgressBar 专门用于进度条输出
+func ProgressBar(format string, args ...interface{}) {
+	Console(format, args...)
+}
+
+// FileLog 输出到文件（用于详细日志）
+func FileLog(level LogLevel, format string, args ...interface{}) {
+	if GlobalLogger != nil {
+		GlobalLogger.logToFile(level, format, args...)
 	}
 }
 
@@ -258,7 +300,7 @@ func (l *Logger) LogWithFields(level LogLevel, message string, fields map[string
 
 	// 序列化为JSON
 	if jsonData, err := json.Marshal(structLog); err == nil {
-		l.logger.Println(string(jsonData))
+		l.fileLogger.Println(string(jsonData))
 	} else {
 		// 如果JSON序列化失败，回退到普通日志
 		l.log(level, "%s %v", message, fields)
@@ -387,5 +429,12 @@ func GetHealthStats() map[string]interface{} {
 func ClearErrorStats() {
 	if GlobalLogger != nil {
 		GlobalLogger.ClearErrorStats()
+	}
+}
+
+// LogToFile 专门用于将日志输出到文件，不输出到控制台
+func LogToFile(format string, args ...interface{}) {
+	if GlobalLogger != nil {
+		GlobalLogger.fileLogger.Printf(format, args...)
 	}
 }

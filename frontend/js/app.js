@@ -2,7 +2,12 @@
 const CONFIG = {
     API_BASE_URL: '/api/v1',
     ITEMS_PER_PAGE: 10,
-    REFRESH_INTERVAL: 10000, // 10秒
+    // 差异化刷新频率策略
+    REFRESH_INTERVALS: {
+        HIGH_FREQUENCY: 10000,   // 10秒 - 系统状态、最新区块
+        MEDIUM_FREQUENCY: 30000, // 30秒 - 统计数据、转账概览
+        LOW_FREQUENCY: 60000     // 60秒 - 市场数据、历史图表
+    },
     CHART_COLORS: {
         primary: '#3b82f6',
         secondary: '#10b981',
@@ -14,7 +19,12 @@ const CONFIG = {
 // 全局状态
 let currentPage = 1;
 let totalPages = 1;
-let refreshInterval;
+// 多频率刷新定时器管理
+let refreshIntervals = {
+    highFrequency: null,    // 高频数据定时器
+    mediumFrequency: null,  // 中频数据定时器
+    lowFrequency: null      // 低频数据定时器
+};
 let charts = {};
 let isInitialized = false;
 let isLoading = false;
@@ -168,6 +178,39 @@ class Utils {
 
 // API 服务
 class ApiService {
+    // 失败计数器
+    static failureCount = {
+        '/stats/summary': 0,
+        '/market/usdt/detailed': 0,
+        '/dashboard/summary': 0
+    };
+    
+    // 增强的本地缓存系统
+    static localCache = {
+        '/stats/summary': null,
+        '/market/usdt/detailed': null,
+        '/dashboard/summary': null
+    };
+    
+    // 缓存配置：不同数据类型的缓存有效期（毫秒）
+    static cacheConfig = {
+        '/stats/summary': {
+            ttl: 30000,        // 30秒 - 统计数据变化较频繁
+            maxAge: 300000,    // 5分钟 - 最大缓存时间
+            staleWhileRevalidate: 60000  // 1分钟 - 过期后仍可使用的时间
+        },
+        '/market/usdt/detailed': {
+            ttl: 60000,        // 1分钟 - 市场数据变化相对较慢
+            maxAge: 600000,    // 10分钟 - 最大缓存时间
+            staleWhileRevalidate: 120000 // 2分钟 - 过期后仍可使用的时间
+        },
+        '/dashboard/summary': {
+            ttl: 20000,        // 20秒 - 综合数据，需要较新
+            maxAge: 180000,    // 3分钟 - 最大缓存时间
+            staleWhileRevalidate: 45000  // 45秒 - 过期后仍可使用的时间
+        }
+    };
+    
     static async request(endpoint, options = {}) {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 10000); // 10秒超时
@@ -201,6 +244,142 @@ class ApiService {
             throw error;
         }
     }
+    
+    // 检查缓存是否有效
+    static isCacheValid(endpoint, forceRefresh = false) {
+        if (forceRefresh) return false;
+        
+        const cache = this.localCache[endpoint];
+        const config = this.cacheConfig[endpoint];
+        
+        if (!cache || !config) return false;
+        
+        const now = Date.now();
+        const age = now - cache.timestamp;
+        
+        // 检查是否在TTL内（新鲜数据）
+        if (age <= config.ttl) {
+            return 'fresh';
+        }
+        
+        // 检查是否在stale-while-revalidate期间（可用但需要后台更新）
+        if (age <= config.ttl + config.staleWhileRevalidate) {
+            return 'stale';
+        }
+        
+        // 检查是否超过最大缓存时间
+        if (age > config.maxAge) {
+            return false;
+        }
+        
+        return 'expired';
+    }
+    
+    // 带智能缓存的请求方法
+    static async requestWithSmartCache(endpoint, options = {}) {
+        const { forceRefresh = false, backgroundUpdate = true } = options;
+        const cacheStatus = this.isCacheValid(endpoint, forceRefresh);
+        
+        // 如果缓存新鲜，直接返回
+        if (cacheStatus === 'fresh') {
+            console.log(`使用新鲜缓存: ${endpoint}`);
+            return this.localCache[endpoint].data;
+        }
+        
+        // 如果缓存过期但仍可用，返回缓存数据并在后台更新
+        if (cacheStatus === 'stale' && backgroundUpdate) {
+            console.log(`使用过期缓存并后台更新: ${endpoint}`);
+            // 后台更新，不等待结果
+            this.updateCacheInBackground(endpoint);
+            return this.localCache[endpoint].data;
+        }
+        
+        // 缓存无效或不存在，发起新请求
+        return await this.requestWithRetryAndCache(endpoint);
+    }
+    
+    // 后台更新缓存
+    static async updateCacheInBackground(endpoint) {
+        try {
+            const result = await this.request(endpoint);
+            this.updateCache(endpoint, result);
+            console.log(`后台缓存更新成功: ${endpoint}`);
+        } catch (error) {
+            console.warn(`后台缓存更新失败: ${endpoint} - ${error.message}`);
+        }
+    }
+    
+    // 更新缓存
+    static updateCache(endpoint, data) {
+        this.localCache[endpoint] = {
+            data: data,
+            timestamp: Date.now(),
+            etag: this.generateETag(data)
+        };
+    }
+    
+    // 生成简单的ETag
+    static generateETag(data) {
+        return btoa(JSON.stringify(data)).slice(0, 16);
+    }
+    
+    // 带重试和缓存回退的请求方法（增强版）
+    static async requestWithRetryAndCache(endpoint, maxRetries = 2) {
+        let lastError = null;
+        
+        for (let attempt = 1; attempt <= maxRetries; attempt++) {
+            try {
+                const result = await this.request(endpoint);
+                // 请求成功，重置失败计数并更新缓存
+                this.failureCount[endpoint] = 0;
+                this.updateCache(endpoint, result);
+                console.log(`API请求成功: ${endpoint}`);
+                return result;
+            } catch (error) {
+                lastError = error;
+                this.failureCount[endpoint] = (this.failureCount[endpoint] || 0) + 1;
+                console.warn(`API请求失败 (${attempt}/${maxRetries}): ${endpoint} - ${error.message}`);
+                
+                if (attempt < maxRetries) {
+                    // 等待后重试
+                    await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+                }
+            }
+        }
+        
+        // 所有重试都失败了，检查是否可以使用过期缓存
+        const cache = this.localCache[endpoint];
+        const config = this.cacheConfig[endpoint];
+        
+        if (cache && config) {
+            const age = Date.now() - cache.timestamp;
+            // 如果在最大缓存时间内，使用过期缓存
+            if (age <= config.maxAge) {
+                console.warn(`API请求失败，使用过期缓存: ${endpoint} (缓存年龄: ${Math.round(age/1000)}秒)`);
+                return cache.data;
+            }
+        }
+        
+        // 没有可用缓存，抛出错误
+        throw lastError || new Error(`API请求失败: ${endpoint}`);
+    }
+    
+    // 清理过期缓存
+    static cleanExpiredCache() {
+        const now = Date.now();
+        Object.keys(this.localCache).forEach(endpoint => {
+            const cache = this.localCache[endpoint];
+            const config = this.cacheConfig[endpoint];
+            
+            if (cache && config) {
+                const age = now - cache.timestamp;
+                if (age > config.maxAge) {
+                    console.log(`清理过期缓存: ${endpoint}`);
+                    this.localCache[endpoint] = null;
+                }
+            }
+        });
+    }
 
     static async getTransfers(page = 1, limit = CONFIG.ITEMS_PER_PAGE, search = '') {
         const params = new URLSearchParams({
@@ -216,7 +395,11 @@ class ApiService {
     }
 
     static async getStats() {
-        return this.request('/stats/summary');
+        return this.requestWithSmartCache('/stats/summary');
+    }
+
+    static async getDashboardSummary() {
+        return this.requestWithSmartCache('/dashboard/summary');
     }
 
     static async getSystemStatus() {
@@ -243,7 +426,7 @@ class ApiService {
     }
 
     static async getVolumeDistribution() {
-        return this.request('/stats/summary');
+        return this.request('/stats/volume-distribution');
     }
 
     static async getSyncMetrics() {
@@ -258,12 +441,10 @@ class ApiService {
         return this.request('/indexer/latest-block');
     }
 
-    static async getUSDTMarketData() {
-        return this.request('/market/usdt');
-    }
+
 
     static async getDetailedUSDTMarketData() {
-        return this.request('/market/usdt/detailed');
+        return this.requestWithSmartCache('/market/usdt/detailed');
     }
 
     static async getTronChainStatus() {
@@ -273,7 +454,45 @@ class ApiService {
 
 // 数据管理器
 class DataManager {
-    static async loadOverviewData() {
+    // 使用合并API加载仪表板概览数据
+    static async loadDashboardSummary() {
+        try {
+            const summaryData = await ApiService.getDashboardSummary();
+            if (summaryData && summaryData.success) {
+                const { stats, market, system, sync } = summaryData.data;
+                
+                // 更新统计数据
+                if (stats) {
+                    this.updateStatsDisplay(stats);
+                }
+                
+                // 更新市场数据
+                if (market) {
+                    this.updateMarketDisplay(market);
+                }
+                
+                // 更新系统状态
+                if (system) {
+                    this.updateSystemDisplay(system);
+                }
+                
+                // 更新同步状态
+                if (sync) {
+                    this.updateSyncDisplay(sync);
+                }
+                
+                return true;
+            }
+        } catch (error) {
+            console.error('Load dashboard summary error:', error);
+            // 降级到分别加载
+            return this.loadOverviewDataFallback();
+        }
+        return false;
+    }
+    
+    // 降级方案：分别加载数据
+    static async loadOverviewDataFallback() {
         try {
             // 只使用统计API加载数据，避免数据冲突
             // 统计API已经包含了从链上获取的最新区块号
@@ -282,10 +501,76 @@ class DataManager {
             // 加载市场数据
             this.loadMarketData();
             
+            return true;
         } catch (error) {
-            console.error('Load overview error:', error);
+            console.error('Load overview fallback error:', error);
             // 设置默认值但不显示错误消息，避免用户体验差
             this.setDefaultValues();
+            return false;
+        }
+    }
+    
+    // 兼容旧方法
+    static async loadOverviewData() {
+        return this.loadDashboardSummary();
+    }
+    
+    // 更新统计数据显示
+    static updateStatsDisplay(stats) {
+        if (stats.total_transfers !== undefined) {
+            elements.totalTransfers.textContent = Utils.formatOverviewNumber(stats.total_transfers);
+        }
+        if (stats.total_volume !== undefined) {
+            elements.totalVolume.textContent = Utils.formatOverviewUSDT(stats.total_volume);
+        }
+        if (stats.latest_block !== undefined) {
+            elements.latestBlock.textContent = Utils.formatOverviewNumber(stats.latest_block);
+        }
+    }
+    
+    // 更新市场数据显示
+    static updateMarketDisplay(market) {
+        if (market.total_supply !== undefined) {
+            elements.totalSupply.textContent = Utils.formatLargeNumber(market.total_supply);
+        }
+        if (market.circulating_supply !== undefined) {
+            elements.circulatingSupply.textContent = Utils.formatLargeNumber(market.circulating_supply);
+        }
+        if (market.market_cap !== undefined) {
+            elements.marketCap.textContent = Utils.formatLargeNumber(market.market_cap);
+        }
+        if (market.circulating_market_cap !== undefined) {
+            elements.circulatingMarketCap.textContent = Utils.formatLargeNumber(market.circulating_market_cap);
+        }
+        if (market.holders !== undefined) {
+            elements.holders.textContent = Utils.formatLargeNumber(market.holders);
+        }
+        if (market.transfers_yesterday !== undefined) {
+            elements.transfersYesterday.textContent = Utils.formatLargeNumber(market.transfers_yesterday);
+        }
+        if (market.trading_volume_yesterday !== undefined) {
+            elements.tradingVolumeYesterday.textContent = Utils.formatLargeNumber(market.trading_volume_yesterday);
+        }
+        if (market.liquidity !== undefined) {
+            elements.liquidity.textContent = Utils.formatLargeNumber(market.liquidity);
+        }
+    }
+    
+    // 更新系统状态显示
+    static updateSystemDisplay(system) {
+        if (system.status !== undefined) {
+            elements.syncStatus.textContent = this.getSyncStatusText(system.status);
+            elements.syncStatus.className = `status ${system.status}`;
+        }
+    }
+    
+    // 更新同步状态显示
+    static updateSyncDisplay(sync) {
+        if (sync.progress !== undefined) {
+            this.updateSyncProgress(sync.progress);
+        }
+        if (sync.metrics !== undefined) {
+            this.updatePerformanceMetrics(sync.metrics);
         }
     }
     
@@ -306,30 +591,28 @@ class DataManager {
     }
     
     static async loadAdditionalData() {
-        // 使用重试机制获取统计数据
+        // 获取统计数据（内置重试和缓存回退）
         try {
-            await Utils.retryWithDelay(async () => {
-                const statsResponse = await ApiService.getStats();
-                if (statsResponse) {
-                    // 更新总转账数
-                    if (statsResponse.total_transfers !== undefined) {
-                        elements.totalTransfers.textContent = Utils.formatOverviewNumber(statsResponse.total_transfers);
-                    }
-                    // 更新总交易量
-                    if (statsResponse.total_amount !== undefined) {
-                        const amount = parseFloat(statsResponse.total_amount) || 0;
-                        elements.totalVolume.textContent = Utils.formatOverviewUSDT(amount.toString());
-                    }
-                    // 使用统计API中的最新区块号（已从链上获取）
-                    if (statsResponse.latest_block_number !== undefined) {
-                        elements.latestBlock.textContent = Utils.formatOverviewNumber(statsResponse.latest_block_number);
-                    }
-                } else {
-                    throw new Error('统计数据响应无效');
+            const statsResponse = await ApiService.getStats();
+            if (statsResponse) {
+                // 更新总转账数
+                if (statsResponse.total_transfers !== undefined) {
+                    elements.totalTransfers.textContent = Utils.formatOverviewNumber(statsResponse.total_transfers);
                 }
-            }, 3, 2000, '获取统计数据');
+                // 更新总交易量
+                if (statsResponse.total_amount !== undefined) {
+                    const amount = parseFloat(statsResponse.total_amount) || 0;
+                    elements.totalVolume.textContent = Utils.formatOverviewUSDT(amount.toString());
+                }
+                // 使用统计API中的最新区块号（已从链上获取）
+                if (statsResponse.latest_block_number !== undefined) {
+                    elements.latestBlock.textContent = Utils.formatOverviewNumber(statsResponse.latest_block_number);
+                }
+            } else {
+                throw new Error('统计数据响应无效');
+            }
         } catch (error) {
-            console.error('获取统计数据最终失败:', error.message);
+            console.error('获取统计数据失败:', error.message);
             elements.totalTransfers.textContent = '获取失败';
             elements.totalVolume.textContent = '获取失败';
         }
@@ -365,56 +648,55 @@ class DataManager {
     }
     
     static async loadMarketData() {
+        // 获取市场数据（内置重试和缓存回退）
         try {
-            await Utils.retryWithDelay(async () => {
-                const marketData = await ApiService.getDetailedUSDTMarketData();
-                if (marketData) {
-                    // 更新总供应量
-                    if (marketData.total_supply !== undefined) {
-                        elements.totalSupply.textContent = Utils.formatOverviewUSDT(marketData.total_supply.toString());
-                    }
-                    
-                    // 更新流通供应量
-                    if (marketData.circulating_supply !== undefined) {
-                        elements.circulatingSupply.textContent = Utils.formatOverviewUSDT(marketData.circulating_supply.toString());
-                    }
-                    
-                    // 更新市值
-                    if (marketData.market_cap !== undefined) {
-                        elements.marketCap.textContent = '$' + Utils.formatOverviewUSDT(marketData.market_cap.toString());
-                    }
-                    
-                    // 更新流通市值
-                    if (marketData.circulating_market_cap !== undefined) {
-                        elements.circulatingMarketCap.textContent = '$' + Utils.formatOverviewUSDT(marketData.circulating_market_cap.toString());
-                    }
-                    
-                    // 更新持有者数量
-                    if (marketData.holders !== undefined) {
-                        elements.holders.textContent = Utils.formatOverviewNumber(marketData.holders);
-                    }
-                    
-                    // 更新昨天转账数量
-                    if (marketData.yesterday_transfers !== undefined) {
-                        elements.transfersYesterday.textContent = Utils.formatOverviewNumber(marketData.yesterday_transfers);
-                    }
-                    
-                    // 更新昨日交易量（使用yesterday_transfers字段）
-                    if (marketData.yesterday_transfers !== undefined) {
-                        elements.tradingVolumeYesterday.textContent = Utils.formatOverviewNumber(marketData.yesterday_transfers);
-                    }
-                    
-                    // 流动性暂时显示为市值的一部分
-                    if (marketData.market_cap !== undefined) {
-                        const liquidity = marketData.market_cap * 0.1; // 假设流动性为市值的10%
-                        elements.liquidity.textContent = '$' + Utils.formatOverviewUSDT(liquidity.toString());
-                    }
-                } else {
-                    throw new Error('市场数据响应无效');
+            const marketData = await ApiService.getDetailedUSDTMarketData();
+            if (marketData) {
+                // 更新总供应量
+                if (marketData.total_supply !== undefined) {
+                    elements.totalSupply.textContent = Utils.formatOverviewUSDT(marketData.total_supply.toString());
                 }
-            }, 3, 2000, '获取市场数据');
+                
+                // 更新流通供应量
+                if (marketData.circulating_supply !== undefined) {
+                    elements.circulatingSupply.textContent = Utils.formatOverviewUSDT(marketData.circulating_supply.toString());
+                }
+                
+                // 更新市值
+                if (marketData.market_cap !== undefined) {
+                    elements.marketCap.textContent = '$' + Utils.formatOverviewUSDT(marketData.market_cap.toString());
+                }
+                
+                // 更新流通市值
+                if (marketData.circulating_market_cap !== undefined) {
+                    elements.circulatingMarketCap.textContent = '$' + Utils.formatOverviewUSDT(marketData.circulating_market_cap.toString());
+                }
+                
+                // 更新持有者数量
+                if (marketData.holders !== undefined) {
+                    elements.holders.textContent = Utils.formatOverviewNumber(marketData.holders);
+                }
+                
+                // 更新昨天转账数量
+                if (marketData.yesterday_transfers !== undefined) {
+                    elements.transfersYesterday.textContent = Utils.formatOverviewNumber(marketData.yesterday_transfers);
+                }
+                
+                // 更新昨日交易量（使用yesterday_transfers字段）
+                if (marketData.yesterday_transfers !== undefined) {
+                    elements.tradingVolumeYesterday.textContent = Utils.formatOverviewNumber(marketData.yesterday_transfers);
+                }
+                
+                // 流动性暂时显示为市值的一部分
+                if (marketData.market_cap !== undefined) {
+                    const liquidity = marketData.market_cap * 0.1; // 假设流动性为市值的10%
+                    elements.liquidity.textContent = '$' + Utils.formatOverviewUSDT(liquidity.toString());
+                }
+            } else {
+                throw new Error('市场数据响应无效');
+            }
         } catch (error) {
-            console.error('获取市场数据最终失败:', error.message);
+            console.error('获取市场数据失败:', error.message);
             // 设置失败提示
             elements.totalSupply.textContent = '获取失败';
             elements.circulatingSupply.textContent = '获取失败';
@@ -659,7 +941,13 @@ class ChartManager {
             const ctx = document.getElementById('volumeDistributionChart').getContext('2d');
             
             // 适配后端API响应格式
-            const data = response ? (response.success ? response.data : response) : [];
+            const data = response && response.data ? response.data : [];
+            const totalTransactions = response && response.total_transactions ? response.total_transactions : 0;
+            
+            // 销毁现有图表
+            if (charts.volumeDistribution) {
+                charts.volumeDistribution.destroy();
+            }
             
             charts.volumeDistribution = new Chart(ctx, {
                 type: 'doughnut',
@@ -669,12 +957,14 @@ class ChartManager {
                         data: data.map(item => item.count),
                         backgroundColor: [
                             '#667eea',
-                            '#764ba2',
+                            '#764ba2', 
                             '#f093fb',
                             '#f5576c',
                             '#4facfe',
                             '#00f2fe'
-                        ]
+                        ],
+                        borderWidth: 2,
+                        borderColor: '#ffffff'
                     }]
                 },
                 options: {
@@ -682,20 +972,184 @@ class ChartManager {
                     maintainAspectRatio: false,
                     plugins: {
                         legend: {
-                            position: 'bottom'
+                            position: 'bottom',
+                            labels: {
+                                padding: 20,
+                                usePointStyle: true,
+                                font: {
+                                    size: 12
+                                }
+                            }
                         },
                         tooltip: {
                             callbacks: {
                                 label: function(context) {
-                                    return `${context.label}: ${context.parsed.toLocaleString()} 笔`;
+                                    const item = data[context.dataIndex];
+                                    const count = item.count.toLocaleString();
+                                    const percentage = item.percentage.toFixed(1);
+                                    const totalAmount = parseFloat(item.total_amount).toLocaleString();
+                                    return [
+                                        `${context.label}`,
+                                        `交易数量: ${count} 笔 (${percentage}%)`,
+                                        `总金额: ${totalAmount} USDT`
+                                    ];
                                 }
-                            }
+                            },
+                            backgroundColor: 'rgba(0, 0, 0, 0.8)',
+                            titleColor: '#ffffff',
+                            bodyColor: '#ffffff',
+                            borderColor: '#667eea',
+                            borderWidth: 1
+                        },
+                        title: {
+                            display: true,
+                            text: `交易量分布 (总计: ${totalTransactions.toLocaleString()} 笔)`,
+                            font: {
+                                size: 14,
+                                weight: 'bold'
+                            },
+                            color: '#333333'
                         }
+                    },
+                    cutout: '60%',
+                    animation: {
+                        animateRotate: true,
+                        duration: 1000
+                    },
+                    onClick: (event, elements) => {
+                        if (elements.length > 0) {
+                            const index = elements[0].index;
+                            const item = data[index];
+                            ChartManager.showVolumeDistributionDetail(item);
+                        }
+                    },
+                    onHover: (event, elements) => {
+                        event.native.target.style.cursor = elements.length > 0 ? 'pointer' : 'default';
                     }
                 }
             });
+            
+            // 更新洞察面板
+            ChartManager.updateVolumeInsights(data, totalTransactions);
         } catch (error) {
+            console.error('Volume distribution chart error:', error);
             Utils.showError('加载交易量分布图表失败');
+        }
+    }
+    
+    static updateVolumeInsights(data, totalTransactions) {
+        try {
+            // 总交易数
+            document.getElementById('totalTransactions').textContent = totalTransactions.toLocaleString();
+            
+            // 主要交易范围（占比最高的）
+            const dominantItem = data.reduce((max, item) => item.percentage > max.percentage ? item : max, data[0]);
+            document.getElementById('dominantRange').textContent = dominantItem.range;
+            
+            // 更新主要交易范围tooltip内容
+            const mediumTransactions = data.find(item => item.range.includes('100-1K'));
+            const dominantRangeTooltipText = document.getElementById('dominantRangeTooltipText');
+            if (dominantRangeTooltipText && mediumTransactions) {
+                const mediumRatio = mediumTransactions.percentage.toFixed(1);
+                dominantRangeTooltipText.textContent = `100-1K USDT 交易占总交易数的 ${mediumRatio}%（包含 ${mediumTransactions.count.toLocaleString()} 笔交易）`;
+            }
+            
+            // 平均交易金额
+            const totalAmount = data.reduce((sum, item) => sum + parseFloat(item.total_amount), 0);
+            const avgAmount = totalAmount / totalTransactions;
+            document.getElementById('avgTransactionSize').textContent = avgAmount.toFixed(0) + ' USDT';
+            
+            // 大额交易占比（10K以上）
+            const largeTransactions = data.filter(item => 
+                item.range.includes('10K') || item.range.includes('100K+')
+            ).reduce((sum, item) => sum + item.count, 0);
+            const largeRatio = (largeTransactions / totalTransactions * 100).toFixed(1);
+            document.getElementById('largeTransactionRatio').textContent = largeRatio + '%';
+            
+            // 更新tooltip内容
+            const tooltipText = document.getElementById('largeTransactionTooltipText');
+            if (tooltipText) {
+                tooltipText.textContent = `统计金额超过 10,000 USDT 以上的交易占总交易数的占比（包含 ${largeTransactions.toLocaleString()} 笔大额交易）`;
+            }
+        } catch (error) {
+            console.error('Update volume insights error:', error);
+        }
+    }
+
+    static showVolumeDistributionDetail(item) {
+        const modal = document.createElement('div');
+        modal.className = 'modal fade';
+        modal.innerHTML = `
+            <div class="modal-dialog modal-lg">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title">交易量分布详情 - ${item.range}</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="card">
+                                    <div class="card-body">
+                                        <h6 class="card-title">交易统计</h6>
+                                        <p class="card-text">
+                                            <strong>交易数量:</strong> ${item.count.toLocaleString()} 笔<br>
+                                            <strong>占比:</strong> ${item.percentage.toFixed(2)}%<br>
+                                            <strong>总金额:</strong> ${parseFloat(item.total_amount).toLocaleString()} USDT
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="card">
+                                    <div class="card-body">
+                                        <h6 class="card-title">平均值分析</h6>
+                                        <p class="card-text">
+                                            <strong>平均交易金额:</strong> ${(parseFloat(item.total_amount) / item.count).toFixed(2)} USDT<br>
+                                            <strong>金额范围:</strong> ${item.range}<br>
+                                            <strong>活跃度:</strong> ${item.percentage > 20 ? '高' : item.percentage > 10 ? '中' : '低'}
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="mt-3">
+                            <div class="alert alert-info">
+                                <strong>分析建议:</strong> 
+                                ${ChartManager.getVolumeAnalysis(item)}
+                            </div>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">关闭</button>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        document.body.appendChild(modal);
+        const bsModal = new bootstrap.Modal(modal);
+        bsModal.show();
+        
+        modal.addEventListener('hidden.bs.modal', () => {
+            document.body.removeChild(modal);
+        });
+    }
+
+    static getVolumeAnalysis(item) {
+        const percentage = item.percentage;
+        const avgAmount = parseFloat(item.total_amount) / item.count;
+        
+        if (item.range.includes('0-100')) {
+            return '小额交易占主导，主要为日常转账和小额支付，用户活跃度高。';
+        } else if (item.range.includes('100-1K')) {
+            return '中小额交易，可能包括商业支付和个人转账，是平台的主要交易类型。';
+        } else if (item.range.includes('1K-10K')) {
+            return '中等金额交易，通常涉及商业往来或投资活动，需要关注合规性。';
+        } else if (item.range.includes('10K-100K')) {
+            return '大额交易，可能涉及企业间转账或大宗交易，建议加强监控。';
+        } else {
+            return '超大额交易，需要特别关注反洗钱和合规要求，建议人工审核。';
         }
     }
 
@@ -715,6 +1169,15 @@ class EventHandler {
                 const target = link.getAttribute('href');
                 this.switchSection(target);
                 this.updateActiveNav(link);
+            });
+        });
+
+        // 板块选择器事件
+        const selectorTabs = document.querySelectorAll('.selector-tab');
+        selectorTabs.forEach(tab => {
+            tab.addEventListener('click', () => {
+                const targetPanel = tab.getAttribute('data-tab');
+                App.switchAnalyticsPanel(targetPanel);
             });
         });
 
@@ -777,6 +1240,22 @@ class EventHandler {
                 ChartManager.initTransferTrendChart(selectedDate, selectedTimeSlot);
             });
         }
+
+        // 交易量分布图表刷新按钮
+        const refreshVolumeBtn = document.getElementById('refreshVolumeBtn');
+        if (refreshVolumeBtn) {
+            refreshVolumeBtn.addEventListener('click', () => {
+                ChartManager.initVolumeDistributionChart();
+            });
+        }
+
+        // 手动同步按钮
+        const manualSyncBtn = document.getElementById('manualSyncBtn');
+        if (manualSyncBtn) {
+            manualSyncBtn.addEventListener('click', async () => {
+                await this.performManualSync();
+            });
+        }
     }
 
     static switchSection(target) {
@@ -815,6 +1294,57 @@ class EventHandler {
             timeout = setTimeout(later, wait);
         };
     }
+
+    static async performManualSync() {
+        const manualSyncBtn = document.getElementById('manualSyncBtn');
+        if (!manualSyncBtn) return;
+
+        // 禁用按钮并显示加载状态
+        manualSyncBtn.disabled = true;
+        const originalText = manualSyncBtn.innerHTML;
+        manualSyncBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 同步中...';
+
+        try {
+            const response = await fetch(`${CONFIG.API_BASE_URL}/sync/manual`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            });
+
+            if (response.ok) {
+                const result = await response.json();
+                console.log('手动同步成功:', result);
+                
+                // 显示成功消息
+                manualSyncBtn.innerHTML = '<i class="fas fa-check"></i> 同步完成';
+                
+                // 刷新数据
+                setTimeout(() => {
+                    UIManager.refreshData();
+                }, 1000);
+                
+                // 2秒后恢复按钮状态
+                setTimeout(() => {
+                    manualSyncBtn.innerHTML = originalText;
+                    manualSyncBtn.disabled = false;
+                }, 2000);
+            } else {
+                throw new Error(`同步失败: ${response.status}`);
+            }
+        } catch (error) {
+            console.error('手动同步失败:', error);
+            
+            // 显示错误消息
+            manualSyncBtn.innerHTML = '<i class="fas fa-exclamation-triangle"></i> 同步失败';
+            
+            // 2秒后恢复按钮状态
+            setTimeout(() => {
+                manualSyncBtn.innerHTML = originalText;
+                manualSyncBtn.disabled = false;
+            }, 2000);
+        }
+    }
 }
 
 // 应用初始化
@@ -833,14 +1363,17 @@ class App {
             // 初始化事件处理器
             EventHandler.init();
             
+            // 初始化分析选择器
+            this.initAnalyticsSelector();
+            
             // 加载初始数据（使用更安全的方式）
             await this.loadInitialDataSafely();
             
             // 初始化图表（可选，失败不影响主要功能）
             this.initChartsAsync();
             
-            // 设置自动刷新
-            this.startAutoRefresh();
+            // 设置快速初始刷新
+            this.startFastInitialRefresh();
             
             isInitialized = true;
             console.log('应用初始化完成');
@@ -854,13 +1387,7 @@ class App {
         }
     }
 
-    static async loadInitialData() {
-        await Promise.all([
-            DataManager.loadOverviewData(),
-            DataManager.loadTransfersData(),
-            DataManager.loadSystemStatus()
-        ]);
-    }
+
     
     static async loadInitialDataSafely() {
         // 优先加载最重要的数据
@@ -882,6 +1409,94 @@ class App {
         }, 100);
     }
     
+    static startFastInitialRefresh() {
+        // 首次加载时使用更短的刷新间隔
+        const fastIntervals = {
+            highFrequency: 3000,   // 3秒 - 系统状态、最新区块
+            mediumFrequency: 5000, // 5秒 - 统计数据、转账概览
+            lowFrequency: 8000     // 8秒 - 市场数据、历史图表
+        };
+        
+        // 记录各频率数据的首次成功状态
+        const successFlags = {
+            highFrequency: false,
+            mediumFrequency: false,
+            lowFrequency: false
+        };
+        
+        // 检查是否所有频率都已成功，如果是则切换到正常间隔
+        const checkAndSwitchToNormal = () => {
+            if (successFlags.highFrequency && successFlags.mediumFrequency && successFlags.lowFrequency) {
+                console.log('所有频率数据首次请求成功，切换到正常刷新间隔');
+                this.stopAutoRefresh();
+                this.startAutoRefresh();
+                return true;
+            }
+            return false;
+        };
+        
+        console.log('启动快速初始刷新定时器');
+        
+        // 高频数据刷新
+        refreshIntervals.highFrequency = setInterval(async () => {
+            if (!document.hidden && isInitialized && !isLoading) {
+                try {
+                    await this.refreshHighFrequencyData();
+                    if (!successFlags.highFrequency) {
+                        successFlags.highFrequency = true;
+                        console.log('高频数据首次刷新成功');
+                        checkAndSwitchToNormal();
+                    }
+                } catch (error) {
+                    console.warn('快速刷新高频数据失败:', error.message);
+                }
+            }
+        }, fastIntervals.highFrequency);
+        
+        // 中频数据刷新
+        refreshIntervals.mediumFrequency = setInterval(async () => {
+            if (!document.hidden && isInitialized && !isLoading) {
+                try {
+                    await this.refreshMediumFrequencyData();
+                    if (!successFlags.mediumFrequency) {
+                        successFlags.mediumFrequency = true;
+                        console.log('中频数据首次刷新成功');
+                        checkAndSwitchToNormal();
+                    }
+                } catch (error) {
+                    console.warn('快速刷新中频数据失败:', error.message);
+                }
+            }
+        }, fastIntervals.mediumFrequency);
+        
+        // 低频数据刷新
+        refreshIntervals.lowFrequency = setInterval(async () => {
+            if (!document.hidden && isInitialized && !isLoading) {
+                try {
+                    await DataManager.loadMarketData();
+                    await DataManager.loadAdditionalData();
+                    await ChartManager.updateCharts();
+                    if (!successFlags.lowFrequency) {
+                        successFlags.lowFrequency = true;
+                        console.log('低频数据首次刷新成功');
+                        checkAndSwitchToNormal();
+                    }
+                } catch (error) {
+                    console.warn('快速刷新低频数据失败:', error.message);
+                }
+            }
+        }, fastIntervals.lowFrequency);
+        
+        // 备用机制：最多30秒后强制切换到正常刷新间隔
+        setTimeout(() => {
+            if (!successFlags.highFrequency || !successFlags.mediumFrequency || !successFlags.lowFrequency) {
+                console.log('30秒超时，强制切换到正常刷新间隔');
+                this.stopAutoRefresh();
+                this.startAutoRefresh();
+            }
+        }, 30000);
+    }
+    
     static initChartsAsync() {
         // 异步初始化图表，不阻塞主流程
         setTimeout(async () => {
@@ -898,30 +1513,223 @@ class App {
         // 清除现有的刷新定时器
         this.stopAutoRefresh();
         
-        refreshInterval = setInterval(() => {
-            // 只在页面可见时刷新数据
+        // 高频数据刷新 (10秒) - 系统状态、最新区块
+        refreshIntervals.highFrequency = setInterval(() => {
             if (!document.hidden && isInitialized && !isLoading) {
                 try {
-                    DataManager.loadOverviewData().catch(err => 
-                        console.warn('自动刷新概览数据失败:', err.message)
-                    );
                     DataManager.loadSystemStatus().catch(err => 
-                        console.warn('自动刷新系统状态失败:', err.message)
+                        console.warn('高频刷新系统状态失败:', err.message)
+                    );
+                    DataManager.loadLatestBlockData().catch(err => 
+                        console.warn('高频刷新区块数据失败:', err.message)
                     );
                 } catch (error) {
-                    console.warn('自动刷新出错:', error.message);
+                    console.warn('高频刷新出错:', error.message);
                 }
             }
-        }, CONFIG.REFRESH_INTERVAL);
+        }, CONFIG.REFRESH_INTERVALS.HIGH_FREQUENCY);
         
-        console.log('自动刷新已启动，间隔:', CONFIG.REFRESH_INTERVAL / 1000, '秒');
+        // 中频数据刷新 (30秒) - 统计数据、转账概览
+        refreshIntervals.mediumFrequency = setInterval(() => {
+            if (!document.hidden && isInitialized && !isLoading) {
+                try {
+                    DataManager.loadAdditionalData().catch(err => 
+                        console.warn('中频刷新统计数据失败:', err.message)
+                    );
+                } catch (error) {
+                    console.warn('中频刷新出错:', error.message);
+                }
+            }
+        }, CONFIG.REFRESH_INTERVALS.MEDIUM_FREQUENCY);
+        
+        // 低频数据刷新 (60秒) - 市场数据、历史图表
+        refreshIntervals.lowFrequency = setInterval(() => {
+            if (!document.hidden && isInitialized && !isLoading) {
+                try {
+                    DataManager.loadMarketData().catch(err => 
+                        console.warn('低频刷新市场数据失败:', err.message)
+                    );
+                    ChartManager.updateCharts().catch(err => 
+                        console.warn('低频刷新图表失败:', err.message)
+                    );
+                } catch (error) {
+                    console.warn('低频刷新出错:', error.message);
+                }
+            }
+        }, CONFIG.REFRESH_INTERVALS.LOW_FREQUENCY);
+        
+
+        
+        console.log('差异化自动刷新已启动:');
+        console.log('- 高频数据(系统状态):', CONFIG.REFRESH_INTERVALS.HIGH_FREQUENCY / 1000, '秒');
+        console.log('- 中频数据(统计数据):', CONFIG.REFRESH_INTERVALS.MEDIUM_FREQUENCY / 1000, '秒');
+        console.log('- 低频数据(市场数据):', CONFIG.REFRESH_INTERVALS.LOW_FREQUENCY / 1000, '秒');
     }
 
     static stopAutoRefresh() {
-        if (refreshInterval) {
-            clearInterval(refreshInterval);
-            refreshInterval = null;
-            console.log('自动刷新已停止');
+        // 清除所有频率的定时器
+        Object.keys(refreshIntervals).forEach(key => {
+            if (refreshIntervals[key]) {
+                clearInterval(refreshIntervals[key]);
+                refreshIntervals[key] = null;
+            }
+        });
+        
+
+        
+        console.log('所有自动刷新定时器已停止');
+    }
+
+    // 暂停自动刷新（页面隐藏时）
+    static pauseAutoRefresh() {
+        this.stopAutoRefresh();
+        this.isPaused = true;
+    }
+
+    // 恢复自动刷新（页面可见时）
+    static resumeAutoRefresh() {
+        if (this.isPaused && isInitialized) {
+            this.startAutoRefresh();
+            this.isPaused = false;
+        }
+    }
+
+    // 处理页面可见性变化
+    static handleVisibilityChange() {
+        const now = Date.now();
+        const timeSinceLastUpdate = now - (this.lastUpdateTime || 0);
+        
+        // 如果超过30秒未更新，立即刷新所有数据
+        if (timeSinceLastUpdate > 30000) {
+            console.log('长时间未更新，立即刷新所有数据');
+            this.forceRefreshAll();
+        } else {
+            // 否则只刷新高频数据
+            console.log('刷新高频数据');
+            this.refreshHighFrequencyData();
+        }
+        
+        // 恢复自动刷新
+        this.resumeAutoRefresh();
+    }
+
+    // 处理用户交互
+    static handleUserInteraction() {
+        const now = Date.now();
+        
+        // 防抖：避免频繁的用户交互触发过多刷新
+        if (this.lastInteractionTime && (now - this.lastInteractionTime) < 5000) {
+            return;
+        }
+        
+        this.lastInteractionTime = now;
+        
+        // 用户交互时，刷新中频数据
+        console.log('用户交互，刷新中频数据');
+        this.refreshMediumFrequencyData();
+    }
+
+    // 处理网络重连
+    static handleNetworkReconnect() {
+        console.log('网络重连，强制刷新所有数据');
+        this.forceRefreshAll();
+    }
+
+    // 强制刷新所有数据
+    static async forceRefreshAll() {
+        try {
+            // 清理过期缓存
+            ApiService.cleanExpiredCache();
+            
+            // 优先使用合并API，提高效率
+            const dashboardSuccess = await DataManager.loadDashboardSummary();
+            
+            if (dashboardSuccess) {
+                // 合并API成功，只需额外加载系统状态
+                await DataManager.loadSystemStatus();
+            } else {
+                // 降级到分别加载所有数据
+                await Promise.all([
+                    DataManager.loadSystemStatus(),
+                    DataManager.loadLatestBlockData(),
+                    DataManager.loadAdditionalData(),
+                    DataManager.loadMarketData()
+                ]);
+            }
+            
+            this.lastUpdateTime = Date.now();
+            console.log('所有数据刷新完成');
+        } catch (error) {
+            console.warn('强制刷新数据失败:', error.message);
+        }
+    }
+
+    // 刷新高频数据
+    static async refreshHighFrequencyData() {
+        try {
+            await Promise.all([
+                DataManager.loadSystemStatus(),
+                DataManager.loadLatestBlockData()
+            ]);
+            console.log('高频数据刷新完成');
+        } catch (error) {
+            console.warn('高频数据刷新失败:', error.message);
+        }
+    }
+
+    // 刷新中频数据 - 使用合并API优化
+    static async refreshMediumFrequencyData() {
+        try {
+            // 优先使用合并API，降级到分别加载
+            const success = await DataManager.loadDashboardSummary();
+            if (!success) {
+                // 降级方案
+                await DataManager.loadAdditionalData();
+            }
+            console.log('中频数据刷新完成');
+        } catch (error) {
+            console.warn('中频数据刷新失败:', error.message);
+        }
+    }
+
+    static switchAnalyticsPanel(panelName) {
+        // 移除所有选择器的active状态
+        const allTabs = document.querySelectorAll('.selector-tab');
+        allTabs.forEach(tab => tab.classList.remove('active'));
+        
+        // 添加当前选择器的active状态
+        const activeTab = document.querySelector(`[data-tab="${panelName}"]`);
+        if (activeTab) {
+            activeTab.classList.add('active');
+        }
+        
+        // 隐藏所有面板
+        const allPanels = document.querySelectorAll('.analytics-panel');
+        allPanels.forEach(panel => panel.classList.remove('active'));
+        
+        // 显示目标面板
+        const targetPanel = document.getElementById(`${panelName}-panel`);
+        if (targetPanel) {
+            targetPanel.classList.add('active');
+            
+            // 根据面板类型初始化相应的图表
+            setTimeout(() => {
+                if (panelName === 'volume-distribution') {
+                    ChartManager.initVolumeDistributionChart();
+                } else if (panelName === 'transfer-trend') {
+                    const selectedDate = document.getElementById('trendDatePicker')?.value || '2025-09-06';
+                    const timeSlot = document.getElementById('timeSlotPicker')?.value || 'all';
+                    ChartManager.initTransferTrendChart(selectedDate, timeSlot);
+                }
+            }, 100);
+        }
+    }
+
+    static initAnalyticsSelector() {
+        // 设置默认选中交易量分布选择器
+        const defaultTab = document.querySelector('[data-tab="volume-distribution"]');
+        if (defaultTab) {
+            defaultTab.classList.add('active');
         }
     }
 }
@@ -934,12 +1742,37 @@ document.addEventListener('DOMContentLoaded', () => {
 // 页面可见性变化时的处理
 document.addEventListener('visibilitychange', () => {
     if (!document.hidden && isInitialized) {
-        // 页面重新可见时，刷新数据
-        console.log('页面重新可见，刷新数据');
-        DataManager.loadOverviewData().catch(err => 
-            console.warn('页面可见时刷新数据失败:', err.message)
-        );
+        // 页面重新可见时，智能刷新数据
+        console.log('页面重新可见，执行智能刷新');
+        App.handleVisibilityChange();
+    } else if (document.hidden) {
+        // 页面隐藏时，暂停自动刷新以节省资源
+        console.log('页面隐藏，暂停自动刷新');
+        App.pauseAutoRefresh();
     }
+});
+
+// 用户交互事件监听
+document.addEventListener('click', () => {
+    App.handleUserInteraction();
+});
+
+document.addEventListener('keydown', () => {
+    App.handleUserInteraction();
+});
+
+// 网络状态变化监听
+window.addEventListener('online', () => {
+    console.log('网络连接恢复，恢复自动刷新');
+    if (isInitialized && !document.hidden) {
+        App.resumeAutoRefresh();
+        App.handleNetworkReconnect();
+    }
+});
+
+window.addEventListener('offline', () => {
+    console.log('网络连接断开，暂停自动刷新');
+    App.pauseAutoRefresh();
 });
 
 // 页面卸载时清理资源

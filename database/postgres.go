@@ -7,8 +7,10 @@ import (
 
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 
 	"Off-chainDatainDexer/config"
+	"Off-chainDatainDexer/utils"
 )
 
 var DB *gorm.DB
@@ -32,7 +34,9 @@ func InitDB(cfg *config.Config) {
 	dsn := fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=%s sslmode=disable",
 		cfg.DBHost, cfg.DBUser, cfg.DBPassword, cfg.DBName, cfg.DBPort)
 
-	DB, err = gorm.Open(postgres.Open(dsn), &gorm.Config{})
+	DB, err = gorm.Open(postgres.Open(dsn), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent), // 禁用GORM日志输出
+	})
 	if err != nil {
 		log.Fatalf("Failed to connect to database: %v", err)
 	}
@@ -129,9 +133,9 @@ func InsertTransferIdempotent(transfer *Transfer) error {
 				return fmt.Errorf("failed to update existing transfer: %w", err)
 			}
 			
-			log.Printf("Updated existing transfer: %s", transfer.TransactionHash)
+			utils.LogToFile("Updated existing transfer: %s", transfer.TransactionHash)
 		} else {
-			log.Printf("Transfer already exists and no update needed: %s", transfer.TransactionHash)
+			utils.LogToFile("Transfer already exists and no update needed: %s", transfer.TransactionHash)
 		}
 		
 		return tx.Commit().Error
@@ -152,14 +156,14 @@ func InsertTransferIdempotent(transfer *Transfer) error {
 			// 可能是并发插入导致的冲突，尝试重新查询
 			var conflictTransfer Transfer
 			if findErr := DB.Where("transaction_hash = ?", transfer.TransactionHash).First(&conflictTransfer).Error; findErr == nil {
-				log.Printf("Concurrent insert detected for transfer: %s", transfer.TransactionHash)
+				utils.LogToFile("Concurrent insert detected for transfer: %s", transfer.TransactionHash)
 				return nil // 记录已存在，视为成功
 			}
 		}
 		return fmt.Errorf("failed to insert transfer: %w", err)
 	}
 
-	log.Printf("Inserted new transfer: %s", transfer.TransactionHash)
+	utils.LogToFile("Inserted new transfer: %s", transfer.TransactionHash)
 	return tx.Commit().Error
 }
 
@@ -226,7 +230,7 @@ func BatchInsertTransfersIdempotent(transfers []*Transfer) error {
 			tx.Rollback()
 			return fmt.Errorf("failed to batch insert transfers: %w", err)
 		}
-		log.Printf("Batch inserted %d new transfers", len(newTransfers))
+		utils.LogToFile("Batch inserted %d new transfers", len(newTransfers))
 	}
 
 	// 批量更新记录
@@ -238,7 +242,7 @@ func BatchInsertTransfersIdempotent(transfers []*Transfer) error {
 	}
 	
 	if len(updateTransfers) > 0 {
-		log.Printf("Updated %d existing transfers", len(updateTransfers))
+		utils.LogToFile("Updated %d existing transfers", len(updateTransfers))
 	}
 
 	return tx.Commit().Error
@@ -293,6 +297,6 @@ func CleanupOldTransfers(olderThan time.Duration) error {
 	if result.Error != nil {
 		return fmt.Errorf("failed to cleanup old transfers: %w", result.Error)
 	}
-	log.Printf("Cleaned up %d old transfer records", result.RowsAffected)
+	utils.LogToFile("Cleaned up %d old transfer records", result.RowsAffected)
 	return nil
 }

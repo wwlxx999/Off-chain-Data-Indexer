@@ -113,8 +113,8 @@ body {
 /* 统一数据网格 */
 .unified-data-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-    gap: 20px;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 15px;
 }
 
 /* 保留原有的market-card样式用于统一展示 */
@@ -127,11 +127,11 @@ body {
 .market-card {
     background: linear-gradient(135deg, #4facfe, #00f2fe);
     color: white;
-    padding: 25px;
+    padding: 18px;
     border-radius: 12px;
     display: flex;
     align-items: center;
-    gap: 20px;
+    gap: 15px;
     transition: transform 0.3s ease, box-shadow 0.3s ease;
     border: 1px solid rgba(255, 255, 255, 0.2);
 }
@@ -142,9 +142,9 @@ body {
 }
 
 .market-icon {
-    font-size: 2.2rem;
+    font-size: 1.8rem;
     opacity: 0.9;
-    min-width: 50px;
+    min-width: 40px;
 }
 
 .market-content {
@@ -152,16 +152,16 @@ body {
 }
 
 .market-value {
-    font-size: 1.8rem;
+    font-size: 1.5rem;
     font-weight: 700;
-    margin-bottom: 5px;
+    margin-bottom: 4px;
     word-break: break-all;
 }
 
 .market-label {
-    font-size: 0.85rem;
+    font-size: 0.8rem;
     opacity: 0.9;
-    line-height: 1.3;
+    line-height: 1.2;
 }
 
 /* 按钮样式 */
@@ -378,6 +378,29 @@ body {
     gap: 15px;
 }
 
+/* 同步控制 */
+.sync-controls {
+    margin-top: 15px;
+    display: flex;
+    justify-content: center;
+}
+
+.sync-controls .btn {
+    font-size: 0.9rem;
+    padding: 8px 16px;
+}
+
+.sync-controls .btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    transform: none;
+}
+
+.sync-controls .btn:disabled:hover {
+    transform: none;
+    box-shadow: none;
+}
+
 .progress-bar {
     flex: 1;
     height: 8px;
@@ -418,6 +441,305 @@ body {
     font-weight: 600;
     color: #333;
 }
+
+/* 洞察面板样式 */
+/* 交易量分布容器 - 自适应扩展 */
+.volume-distribution-container {
+    min-height: 600px;
+    display: flex;
+    flex-direction: column;
+    transition: all 0.3s ease;
+}
+
+.volume-distribution-container .chart-container {
+    flex: 1;
+    min-height: 300px;
+    margin-top: 20px;
+}
+
+/* 概览面板样式 */
+.volume-overview {
+    background: linear-gradient(135deg, #f8f9fa 0%, #ffffff 100%);
+    border-radius: 12px;
+    padding: 20px;
+    margin: 20px 0;
+    border: 1px solid #e9ecef;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+}
+
+.overview-title {
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: #495057;
+    margin-bottom: 15px;
+    text-align: center;
+    position: relative;
+}
+
+.overview-title::after {
+    content: '';
+    position: absolute;
+    bottom: -5px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 40px;
+    height: 2px;
+    background: linear-gradient(90deg, #667eea, #764ba2);
+    border-radius: 1px;
+}
+
+.overview-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 15px;
+    margin-top: 20px;
+}
+
+.overview-item {
+    display: flex;
+    align-items: center;
+    padding: 15px;
+    background: rgba(255, 255, 255, 0.8);
+    border-radius: 10px;
+    border: 1px solid rgba(102, 126, 234, 0.1);
+    transition: all 0.3s ease;
+    cursor: pointer;
+}
+
+.overview-item:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 6px 20px rgba(102, 126, 234, 0.15);
+    border-color: rgba(102, 126, 234, 0.3);
+    background: rgba(255, 255, 255, 0.95);
+}
+
+.overview-icon {
+    width: 45px;
+    height: 45px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #667eea, #764ba2);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-right: 15px;
+    flex-shrink: 0;
+}
+
+.overview-icon i {
+    color: white;
+    font-size: 1.2rem;
+}
+
+.overview-content {
+    flex: 1;
+}
+
+.overview-value {
+    font-size: 1.4rem;
+    font-weight: 700;
+    color: #667eea;
+    margin-bottom: 3px;
+    line-height: 1.2;
+}
+
+.overview-label {
+    font-size: 0.8rem;
+    color: #6c757d;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+/* 板块选择器样式 */
+.analytics-selector {
+    margin-bottom: 24px;
+}
+
+.selector-tabs {
+    display: flex;
+    background: #f8f9fa;
+    border-radius: 12px;
+    padding: 4px;
+    gap: 4px;
+    max-width: 400px;
+    margin: 0 auto;
+}
+
+.selector-tab {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 12px 16px;
+    border: none;
+    background: transparent;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    font-size: 14px;
+    font-weight: 500;
+    color: #6c757d;
+}
+
+.selector-tab:hover {
+    background: rgba(102, 126, 234, 0.1);
+    color: #667eea;
+}
+
+.selector-tab.active {
+    background: #667eea;
+    color: white;
+    box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+}
+
+.selector-tab i {
+    font-size: 16px;
+}
+
+.selector-tab span {
+    font-weight: inherit;
+}
+
+/* 面板样式 */
+.analytics-panel {
+    display: none;
+    animation: fadeIn 0.3s ease-in-out;
+}
+
+.analytics-panel.active {
+    display: block;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* Tooltip 样式 */
+
+.tooltip {
+    position: absolute;
+    bottom: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(0, 0, 0, 0.9);
+    color: white;
+    padding: 12px 16px;
+    border-radius: 8px;
+    font-size: 14px;
+    white-space: nowrap;
+    opacity: 0;
+    visibility: hidden;
+    transition: all 0.3s ease;
+    z-index: 1000;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    margin-bottom: 8px;
+    max-width: 300px;
+    white-space: normal;
+}
+
+.tooltip::after {
+    content: '';
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    border: 6px solid transparent;
+    border-top-color: rgba(0, 0, 0, 0.9);
+}
+
+.tooltip-content {
+    text-align: left;
+}
+
+.tooltip-title {
+    font-weight: 600;
+    margin-bottom: 4px;
+    color: #4fc3f7;
+    font-size: 15px;
+}
+
+.tooltip-text {
+    font-size: 13px;
+    line-height: 1.4;
+    color: #e0e0e0;
+}
+
+.overview-item:hover .tooltip {
+    opacity: 1;
+    visibility: visible;
+    transform: translateX(-50%) translateY(-5px);
+}
+
+/* 响应式设计 */
+@media (max-width: 768px) {
+    .overview-grid {
+        grid-template-columns: 1fr;
+    }
+    
+    .overview-item {
+        padding: 12px;
+    }
+    
+    .overview-icon {
+        width: 40px;
+        height: 40px;
+        margin-right: 12px;
+    }
+    
+    .overview-value {
+        font-size: 1.2rem;
+    }
+    
+    .selector-tabs {
+        max-width: 100%;
+    }
+    
+    .selector-tab {
+        padding: 10px 12px;
+        font-size: 13px;
+    }
+    
+    .selector-tab span {
+        display: none;
+    }
+    
+    .selector-tab i {
+        font-size: 18px;
+    }
+    
+    /* 移动端tooltip优化 */
+    .tooltip {
+        position: fixed;
+        bottom: auto;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        max-width: 280px;
+        font-size: 13px;
+        padding: 10px 14px;
+        z-index: 9999;
+    }
+    
+    .tooltip::after {
+        display: none;
+    }
+    
+    .overview-item:hover .tooltip {
+        transform: translate(-50%, -50%);
+    }
+}
+
+
 
 /* 页脚 */
 .footer {
@@ -477,63 +799,7 @@ body {
     font-weight: 500;
 }
 
-/* 响应式设计 */
-@media (max-width: 768px) {
-    .container {
-        padding: 10px;
-    }
-    
-    .header-content {
-        flex-direction: column;
-        gap: 20px;
-        text-align: center;
-    }
-    
-    .nav {
-        flex-wrap: wrap;
-        justify-content: center;
-    }
-    
-    .section {
-        padding: 20px;
-    }
-    
-    .section-header {
-        flex-direction: column;
-        gap: 15px;
-        align-items: stretch;
-    }
-    
-    .section-controls {
-        justify-content: center;
-    }
-    
-    .search-input {
-        width: 100%;
-        max-width: 300px;
-    }
-    
-    .unified-data-grid {
-        grid-template-columns: 1fr;
-    }
-    
-    .charts-grid {
-        grid-template-columns: 1fr;
-    }
-    
-    .system-grid {
-        grid-template-columns: 1fr;
-    }
-    
-    .transfers-table {
-        font-size: 0.8rem;
-    }
-    
-    .transfers-table th,
-    .transfers-table td {
-        padding: 8px;
-    }
-}
+
 
 /* 动画效果 */
 @keyframes fadeInUp {

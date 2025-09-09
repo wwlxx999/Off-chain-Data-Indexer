@@ -25,8 +25,8 @@ type Config struct {
 	BatchSize    uint64
 	LogLevel     string // 日志级别配置
 	// 新增故障处理配置
-	TronNodes    []TronNodeConfig
-	RetryConfig  RetryConfig
+	TronNodes   []TronNodeConfig
+	RetryConfig RetryConfig
 	// 新增并发同步配置
 	ConcurrentConfig ConcurrentConfig
 	// TronScan API配置
@@ -61,10 +61,10 @@ type ConcurrentConfig struct {
 
 // TronScanConfig TronScan API配置
 type TronScanConfig struct {
-	APIURL   string   // TronScan API端点URL
-	APIKeys  []string // TronScan API密钥列表
-	Timeout  time.Duration // 请求超时时间
-	Enabled  bool     // 是否启用TronScan API
+	APIURL  string        // TronScan API端点URL
+	APIKeys []string      // TronScan API密钥列表
+	Timeout time.Duration // 请求超时时间
+	Enabled bool          // 是否启用TronScan API
 }
 
 // LoadConfig 加载配置（保持向后兼容）
@@ -85,7 +85,7 @@ func LoadConfig() *Config {
 		TronNodeURL:  getEnv("TRON_NODE_URL", "https://api.trongrid.io"),
 		TronAPIKey:   getEnv("TRON_API_KEY", ""),
 		USDTContract: getEnv("USDT_CONTRACT", "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t"),
-		SyncInterval: parseDuration(getEnv("SYNC_INTERVAL", "10s")),
+		SyncInterval: parseDuration(getEnv("SYNC_INTERVAL", "3m")),
 		StartBlock:   parseUint64(getEnv("START_BLOCK", "0")),
 		BatchSize:    parseUint64(getEnv("BATCH_SIZE", "100")),
 		LogLevel:     getEnv("LOG_LEVEL", "INFO"),
@@ -158,7 +158,7 @@ func parseFloat64(s string, defaultValue float64) float64 {
 // loadTronNodes 加载TRON节点配置
 func loadTronNodes() []TronNodeConfig {
 	nodes := []TronNodeConfig{}
-	
+
 	// 主节点（向后兼容）
 	mainNode := TronNodeConfig{
 		URL:    getEnv("TRON_NODE_URL", "https://api.trongrid.io"),
@@ -166,12 +166,12 @@ func loadTronNodes() []TronNodeConfig {
 		Weight: 100,
 	}
 	nodes = append(nodes, mainNode)
-	
+
 	// 扩展的备用节点配置 - 支持更多节点
-	backupNodeConfigs := []struct{
-		envKey string
+	backupNodeConfigs := []struct {
+		envKey    string
 		apiKeyEnv string
-		weight int
+		weight    int
 	}{
 		{"TRON_NODE_URL_2", "TRON_API_KEY_2", 80},
 		{"TRON_NODE_URL_3", "TRON_API_KEY_3", 70},
@@ -180,7 +180,7 @@ func loadTronNodes() []TronNodeConfig {
 		{"TRON_NODE_URL_6", "TRON_API_KEY_6", 40},
 		{"TRON_NODE_URL_7", "TRON_API_KEY_7", 30},
 	}
-	
+
 	for _, config := range backupNodeConfigs {
 		url := getEnv(config.envKey, "")
 		if url != "" {
@@ -192,7 +192,7 @@ func loadTronNodes() []TronNodeConfig {
 			nodes = append(nodes, node)
 		}
 	}
-	
+
 	return nodes
 }
 
@@ -210,7 +210,7 @@ func loadRetryConfig() RetryConfig {
 // loadTronScanConfig 加载TronScan API配置
 func loadTronScanConfig() TronScanConfig {
 	apiURL := getEnv("TRONSCAN_API_URL", "https://apilist.tronscanapi.com")
-	
+
 	// 收集所有配置的API密钥
 	var apiKeys []string
 	if key1 := getEnv("TRONSCAN_API_KEY_1", ""); key1 != "" {
@@ -219,10 +219,10 @@ func loadTronScanConfig() TronScanConfig {
 	if key2 := getEnv("TRONSCAN_API_KEY_2", ""); key2 != "" {
 		apiKeys = append(apiKeys, key2)
 	}
-	
+
 	// 如果有API密钥则启用TronScan API
 	enabled := len(apiKeys) > 0
-	
+
 	return TronScanConfig{
 		APIURL:  apiURL,
 		APIKeys: apiKeys,

@@ -149,17 +149,17 @@ func generateCacheKey(c *gin.Context) string {
 func determineCacheTTL(path string, defaultTTL time.Duration) time.Duration {
 	switch {
 	case strings.Contains(path, "/health"):
-		return 30 * time.Second // 健康检查缓存30秒
+		return 3 * time.Minute // 健康检查缓存3分钟
 	case strings.Contains(path, "/stats/summary"):
-		return 10 * time.Second // 统计摘要（包含实时区块号）缓存10秒
+		return 3 * time.Minute // 统计摘要（包含实时区块号）缓存3分钟
 	case strings.Contains(path, "/stats"):
-		return 2 * time.Minute // 其他统计信息缓存2分钟
+		return 3 * time.Minute // 其他统计信息缓存3分钟
 	case strings.Contains(path, "/transfers"):
-		return 2 * time.Minute // 转账记录缓存2分钟
+		return 3 * time.Minute // 转账记录缓存3分钟
 	case strings.Contains(path, "/market"):
-		return 1 * time.Minute // 市场数据缓存1分钟
+		return 3 * time.Minute // 市场数据缓存3分钟
 	case strings.Contains(path, "/indexer"):
-		return 10 * time.Minute // 索引器状态缓存10分钟
+		return 3 * time.Minute // 索引器状态缓存3分钟
 	default:
 		return defaultTTL
 	}

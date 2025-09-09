@@ -768,7 +768,7 @@ func (tc *TronHTTPClient) selectHealthyNode() int {
 	// 按权重排序查找健康的节点
 	bestIndex := -1
 	bestWeight := -1
-	
+
 	for i, node := range tc.nodes {
 		if status, exists := tc.nodeStatus[node.URL]; exists && status.Healthy {
 			// 选择权重最高的健康节点
@@ -820,7 +820,7 @@ func (tc *TronHTTPClient) markNodeFailure(nodeURL string) {
 		status.LastFailure = time.Now()
 		status.FailCount++
 		tc.nodeStatus[nodeURL] = status
-		log.Printf("节点 %s 标记为不健康，失败次数: %d", nodeURL, status.FailCount)
+		utils.LogToFile("节点 %s 标记为不健康，失败次数: %d", nodeURL, status.FailCount)
 	}
 }
 
@@ -834,7 +834,7 @@ func (tc *TronHTTPClient) markNodeRateLimited(nodeURL string) {
 		status.LastFailure = time.Now()
 		status.FailCount++
 		tc.nodeStatus[nodeURL] = status
-		log.Printf("⚠️ 节点 %s 遇到限流(429)，暂时标记为不可用", nodeURL)
+		utils.LogToFile("⚠️ 节点 %s 遇到限流(429)，暂时标记为不可用", nodeURL)
 	}
 }
 
@@ -848,7 +848,7 @@ func (tc *TronHTTPClient) markNodeSuccess(nodeURL string) {
 		status.LastCheck = time.Now()
 		status.FailCount = 0
 		tc.nodeStatus[nodeURL] = status
-		log.Printf("✅ 节点 %s 恢复健康状态", nodeURL)
+		utils.LogToFile("✅ 节点 %s 恢复健康状态", nodeURL)
 	}
 }
 
@@ -865,12 +865,12 @@ func (tc *TronHTTPClient) tryRecoverNodes() {
 			if time.Since(status.LastFailure) < 6*time.Minute {
 				recoveryTime = 5 * time.Minute // 可能是限流错误，恢复时间较短
 			}
-			
+
 			if now.Sub(status.LastFailure) >= recoveryTime {
 				status.Healthy = true
 				status.FailCount = 0
 				tc.nodeStatus[nodeURL] = status
-				log.Printf("🔄 节点 %s 已自动恢复，可重新尝试使用", nodeURL)
+				utils.LogToFile("🔄 节点 %s 已自动恢复，可重新尝试使用", nodeURL)
 			}
 		}
 	}

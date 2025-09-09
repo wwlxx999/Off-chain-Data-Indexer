@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -83,7 +84,7 @@ func main() {
 	}
 	indexerService = services.NewIndexerService()
 	marketService = services.NewMarketService()
-	
+
 	// 设置服务之间的依赖关系
 	transferService.SetMarketService(marketService)
 	marketService.SetTransferService(transferService)
@@ -92,7 +93,7 @@ func main() {
 	tronClient = blockchain.NewTronHTTPClient(cfg.TronNodeURL, cfg.TronAPIKey, cfg.USDTContract)
 
 	// 创建同步服务（新的构造函数）
-	syncService, err = services.NewSyncService(database.GetDB())
+	syncService, err = services.NewSyncService(database.GetDB(), transferService, marketService)
 	if err != nil {
 		utils.Fatal("Failed to create sync service: %v", err)
 	}
@@ -157,6 +158,7 @@ func main() {
 			stats.GET("/addresses/top", getTopAddresses)
 			stats.GET("/hourly", getHourlyStats)
 			stats.GET("/hourly-trend", getHourlyTrend)
+			stats.GET("/volume-distribution", getVolumeDistribution)
 		}
 
 		// 市场数据接口
@@ -198,11 +200,16 @@ func main() {
 			sync.GET("/status", getSyncStatus)
 			sync.POST("/resync", resyncData)
 			sync.POST("/missing-blocks", syncMissingBlocks)
+			sync.POST("/manual", manualSync)
 			sync.GET("/metrics", getSyncMetrics)
 			sync.GET("/health", syncHealthCheck)
 		}
 
-
+		// 合并API接口 - 减少前端API调用次数
+		dashboard := api.Group("/dashboard")
+		{
+			dashboard.GET("/summary", getDashboardSummary)
+		}
 
 		// 监控接口
 		if cacheService != nil {
@@ -290,13 +297,28 @@ func loggingMiddleware() gin.HandlerFunc {
 			path = path + "?" + raw
 		}
 
-		logMessage := fmt.Sprintf("%s %s %d %v %s",
-			method, path, statusCode, latency, clientIP)
-
+		// 优化日志记录：只记录错误请求和重要请求
+		shouldLog := false
 		if statusCode >= 400 {
-			utils.Warn("HTTP Request: %s", logMessage)
-		} else {
-			utils.Info("HTTP Request: %s", logMessage)
+			// 记录所有错误请求
+			shouldLog = true
+		} else if method != "GET" {
+			// 记录所有非GET请求（POST、PUT、DELETE等重要操作）
+			shouldLog = true
+		} else if strings.Contains(path, "/sync") || strings.Contains(path, "/indexer") {
+			// 记录重要的GET请求（同步和索引相关）
+			shouldLog = true
+		}
+
+		if shouldLog {
+			logMessage := fmt.Sprintf("%s %s %d %v %s",
+				method, path, statusCode, latency, clientIP)
+
+			if statusCode >= 400 {
+				utils.Warn("HTTP Request: %s", logMessage)
+			} else {
+				utils.Info("HTTP Request: %s", logMessage)
+			}
 		}
 	}
 }
@@ -423,7 +445,7 @@ func getStatsSummary(c *gin.Context) {
 	// 获取链上最新区块号，覆盖数据库中的旧值
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	
+
 	latestBlock, err := tronClient.GetLatestBlockNumber(ctx)
 	if err != nil {
 		utils.Warn("Failed to get latest block from chain, using database value: %v", err)
@@ -583,7 +605,6 @@ func getSyncStatus(c *gin.Context) {
 
 // initializeBlockchainClients 初始化区块链客户端
 
-
 // 重新同步数据
 func resyncData(c *gin.Context) {
 	// 解析请求参数
@@ -632,7 +653,7 @@ func resyncData(c *gin.Context) {
 			Amount:          transfer.Amount.String(),
 			BlockNumber:     transfer.BlockNumber,
 		}
-		
+
 		// 调用服务层保存数据
 		_, err := transferService.CreateTransfer(req)
 		if err != nil {
@@ -656,6 +677,29 @@ func resyncData(c *gin.Context) {
 func syncMissingBlocks(c *gin.Context) {
 	// TODO: 实现同步缺失区块逻辑
 	c.JSON(http.StatusOK, gin.H{"message": "Missing blocks sync completed successfully"})
+}
+
+// 手动同步
+func manualSync(c *gin.Context) {
+	utils.Info("Manual sync triggered")
+
+	// 创建上下文，设置5分钟超时
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	// 执行一次同步操作
+	err := syncService.PerformManualSync(ctx)
+	if err != nil {
+		utils.Error("Manual sync failed: %v", err)
+		handleAppError(c, utils.WrapError(err, "Manual sync failed"))
+		return
+	}
+
+	utils.Info("Manual sync completed successfully")
+	c.JSON(http.StatusOK, gin.H{
+		"message":   "Manual sync completed successfully",
+		"timestamp": time.Now().Unix(),
+	})
 }
 
 // 获取同步指标
@@ -688,22 +732,20 @@ func getSyncMetrics(c *gin.Context) {
 // 同步服务健康检查
 func syncHealthCheck(c *gin.Context) {
 	health := syncService.HealthCheck()
-	
+
 	// 添加错误统计信息
 	errorStats := utils.GetErrorStats()
 	healthStats := utils.GetHealthStats()
-	
+
 	response := map[string]interface{}{
 		"health":       health,
 		"error_stats":  errorStats,
 		"health_stats": healthStats,
 		"timestamp":    time.Now(),
 	}
-	
+
 	c.JSON(http.StatusOK, response)
 }
-
-
 
 // 获取最近一小时内的USDT交易统计
 func getHourlyStats(c *gin.Context) {
@@ -827,4 +869,108 @@ func deleteHistoricalData(c *gin.Context) {
 		"deleted_count": deletedCount,
 		"timestamp":     time.Now().Format(time.RFC3339),
 	})
+}
+
+// getVolumeDistribution 获取交易量分布统计
+func getVolumeDistribution(c *gin.Context) {
+	// 调用服务层
+	result, err := transferService.GetVolumeDistribution()
+	if err != nil {
+		handleAppError(c, utils.WrapError(err, "Failed to get volume distribution"))
+		return
+	}
+
+	c.JSON(http.StatusOK, result)
+}
+
+// getDashboardSummary 获取仪表板概览数据（合并多个API）
+func getDashboardSummary(c *gin.Context) {
+	type DashboardSummary struct {
+		// 统计数据
+		Stats *services.StatsResponse `json:"stats"`
+		// 市场数据
+		MarketData *services.USDTMarketData `json:"market_data"`
+		// 系统状态
+		SystemStatus map[string]interface{} `json:"system_status"`
+		// 同步状态
+		SyncStatus map[string]interface{} `json:"sync_status"`
+		// 数据更新时间
+		LastUpdated string `json:"last_updated"`
+	}
+
+	summary := &DashboardSummary{
+		LastUpdated: time.Now().Format(time.RFC3339),
+	}
+
+	// 并发获取各种数据
+	type result struct {
+		stats        *services.StatsResponse
+		marketData   *services.USDTMarketData
+		systemStatus map[string]interface{}
+		syncStatus   map[string]interface{}
+		err          error
+	}
+
+	resultChan := make(chan result, 4)
+
+	// 获取统计数据
+	go func() {
+		stats, err := transferService.GetStats()
+		if err == nil {
+			// 获取链上最新区块号
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if latestBlock, blockErr := tronClient.GetLatestBlockNumber(ctx); blockErr == nil {
+				stats.LatestBlockNumber = latestBlock
+			}
+		}
+		resultChan <- result{stats: stats, err: err}
+	}()
+
+	// 获取市场数据
+	go func() {
+		marketData, err := marketService.GetDetailedUSDTData()
+		resultChan <- result{marketData: marketData, err: err}
+	}()
+
+	// 获取系统状态
+	go func() {
+		status := map[string]interface{}{
+			"status":    "healthy",
+			"message":   "Off-chain Data Indexer is running",
+			"timestamp": time.Now().Unix(),
+			"version":   "1.0.0",
+		}
+		resultChan <- result{systemStatus: status}
+	}()
+
+	// 获取同步状态
+	go func() {
+		status := syncService.GetSyncProgress()
+		resultChan <- result{syncStatus: status}
+	}()
+
+	// 收集结果
+	for i := 0; i < 4; i++ {
+		select {
+		case res := <-resultChan:
+			if res.stats != nil {
+				summary.Stats = res.stats
+			}
+			if res.marketData != nil {
+				summary.MarketData = res.marketData
+			}
+			if res.systemStatus != nil {
+				summary.SystemStatus = res.systemStatus
+			}
+			if res.syncStatus != nil {
+				summary.SyncStatus = res.syncStatus
+			}
+		case <-time.After(10 * time.Second):
+			utils.Warn("Dashboard summary request timeout")
+			break
+		}
+	}
+
+	c.JSON(http.StatusOK, summary)
 }
